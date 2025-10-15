@@ -5,6 +5,13 @@ app_description = "Expose more commands to Bench"
 app_email = "safwan@tridz.com"
 app_license = "mit"
 
+
+# doc_events = {
+#     "Lightning Upload": {
+#         "validate": "commander.commander.doctype.lightning_upload.lightning_upload.process_uploaded_file"
+#     }
+# }
+
 # Apps
 # ------------------
 
@@ -241,4 +248,6 @@ app_license = "mit"
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
+
+
 
