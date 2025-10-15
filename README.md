@@ -1,6 +1,6 @@
 # Commander
 
-A lightweight CLI tool for rapidly creating Frappe DocTypes with fields through the command line.
+A lightweight CLI tool extending Frappe Bench to add support for creating DocTypes with fields through the command line to better support development using AI based IDEs.
 
 > **Note:** This is experimental software, not recommended for production use. Commander is part of a wider initiative to make Frappe application development natively agentic—moving beyond low-code to "vibe codable" development from within. This works alongside [frappe_ElevenLabs](https://github.com/tridz-dev/frappe_ElevenLabs) (voice AI interface) and [agent_flo](https://github.com/tridz-dev/agent_flo) (multi model, multi agent workflows). We expect these initiatives to compound and merge over time.
 
@@ -8,7 +8,6 @@ A lightweight CLI tool for rapidly creating Frappe DocTypes with fields through 
 
 Commander eliminates the need to manually create DocTypes through the Desk UI or write JSON files. It provides a simple, declarative CLI interface to generate Frappe DocTypes with field definitions, validation rules, and permissions in seconds.
 
-**Philosophy:** Create fast, refine in Desk. Get 80% of DocType structure via CLI, polish the remaining 20% in UI.
 
 ## Installation
 
@@ -203,12 +202,6 @@ bench --site mysite install-app commander
 bench --site mysite new-doctype "Test Doc" -f "name:Data:*"
 ```
 
-## Contributing
-
-Contributions are welcome! Please ensure:
-- Code follows existing style conventions
-- New features are documented in AGENTS.md
-- Test commands before submitting PRs
 
 ## License
 
@@ -221,7 +214,5 @@ MIT
 - Frappe Framework: https://frappeframework.com
 - Bench CLI: https://github.com/frappe/bench
 
----
 
-**Built with** Frappe Framework + Click CLI
 
