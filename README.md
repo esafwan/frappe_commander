@@ -25,11 +25,21 @@ bench --site your-site install-app commander
 ### Basic Example
 
 ```bash
+# Non-interactive mode (all arguments provided)
 bench --site mysite new-doctype "Product" \
   -f "product_name:Data:*" \
   -f "price:Currency" \
   -f "description:Text" \
   -m "Custom"
+
+# Interactive mode (prompts for missing info)
+bench --site mysite new-doctype "Product"
+# Will guide you through adding fields and selecting module
+
+# Show comprehensive help
+bench help
+bench help --field-types
+bench help --examples
 ```
 
 ### Field Definition Syntax
@@ -123,6 +133,8 @@ bench --site mysite new-doctype "Task" \
 ## Features
 
 - Rapid DocType scaffolding from command line
+- **Interactive mode** - Guided prompts for missing information
+- **Comprehensive help system** - Detailed documentation and examples
 - Human-readable field definition syntax
 - Automatic module management
 - Built-in validation and error checking
@@ -150,18 +162,66 @@ See [AGENTS.md](AGENTS.md) - Complete technical documentation for developers and
 ## Command Reference
 
 ```bash
-# Show help
+# Show command help
 bench new-doctype --help
 
-# Create with fields
+# Show comprehensive help
+bench help
+bench help --field-types
+bench help --examples
+
+# Create with fields (non-interactive)
 bench --site mysite new-doctype "DocType Name" \
   -f "field1:Type:*" \
   -f "field2:Type:?=default" \
   -m "Module"
 
+# Interactive mode (prompts for missing info)
+bench --site mysite new-doctype "DocType Name"
+# Prompts for fields and module if not provided
+
 # Create without fields (add later in Desk)
 bench --site mysite new-doctype "Simple DocType"
+
+# Disable interactive mode (fail if missing info)
+bench --site mysite new-doctype "Product" --no-interact
 ```
+
+## Interactive Mode
+
+Commander supports an intuitive interactive mode that guides you through DocType creation:
+
+```bash
+$ bench --site mysite new-doctype "Product"
+
+📦 Module selection:
+   Module [Custom]: Inventory
+
+❓ Add fields now? [Y/n]: y
+
+🔧 Adding fields (leave empty to finish):
+💡 Field definition examples:
+   • name:Data:*                    (required text field)
+   • price:Currency:?=0             (currency with default)
+   ...
+
+   Field 1: product_name:Data:*
+   ✓ Added: product_name:Data:*
+
+   Field 2: price:Currency:?=0
+   ✓ Added: price:Currency:?=0
+
+   Field 3: [Enter]
+
+✅ DocType 'Product' created successfully in module 'Inventory'.
+```
+
+**Interactive Features:**
+- Prompts only for missing information
+- Validates fields as you enter them
+- Type `help` during field entry for syntax assistance
+- Type `done` or leave empty to finish
+- Clear error messages with suggestions
 
 ## Limitations
 

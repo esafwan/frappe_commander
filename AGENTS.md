@@ -32,13 +32,22 @@ bench --site your-site install-app commander
 ### Basic Usage
 
 ```bash
-# Create a simple DocType
+# Create a simple DocType (non-interactive)
 bench --site mysite new-doctype "Product" \
   -f "product_name:Data:*" \
   -f "price:Currency" \
   -m "Custom"
 
 # Output: DocType 'Product' created in module 'Custom'.
+
+# Interactive mode (prompts for missing info)
+bench --site mysite new-doctype "Product"
+# Will prompt for fields and module if not provided
+
+# Show comprehensive help
+bench help
+bench help --field-types
+bench help --examples
 ```
 
 ### Field Definition Syntax
@@ -73,19 +82,27 @@ commander/
 
 #### 1. **CLI Command Registration** (`commands.py`)
 
-**Location:** `commander/commands.py:129-163`
+**Location:** `commander/commands.py:240-280`
 
 ```python
 @click.command("new-doctype")
-@click.argument("doctype_name")
+@click.argument("doctype_name", required=False)
 @click.option("-f", "--fields", multiple=True, help="Field definitions.")
-@click.option("-m", "--module", default="Custom", help="Module name.")
+@click.option("-m", "--module", default=None, help="Module name.")
 @click.option("--no-interact", is_flag=True, default=False)
 @pass_context
 def new_doctype_cmd(context, doctype_name, fields, module, no_interact):
     """Create a new DocType with specified fields."""
+    # Interactive prompts if missing info
     # Implementation...
 ```
+
+**Interactive Mode Functions:**
+- `prompt_for_doctype_name()` - Prompts for DocType name
+- `prompt_for_module()` - Prompts for module selection
+- `prompt_for_fields()` - Interactive field entry with validation
+- `show_field_examples()` - Displays field syntax examples
+- `show_field_help()` - Detailed field type and attribute help
 
 **How it works:**
 - Uses Click's `@click.command()` decorator to create `bench new-doctype`
@@ -237,7 +254,7 @@ else:
 **File:** `commands.py:163`
 
 ```python
-commands = [new_doctype_cmd]
+commands = [new_doctype_cmd, help_cmd]
 ```
 
 **How Frappe finds it:**
@@ -357,6 +374,168 @@ bench --site mysite new-doctype "Task" \
 - Validates field types against allowed list
 - Validates attribute combinations
 - Checks module/app existence
+
+**6. Interactive Mode**
+- Prompts for missing DocType name, fields, and module
+- Guides users through field creation with examples
+- Provides inline help during field entry
+- User-friendly error messages and validation
+
+**7. Comprehensive Help System**
+- Dedicated `help` command with examples and guides
+- Field type documentation and syntax help
+- Usage examples for common scenarios
+- Context-sensitive help during interactive mode
+
+---
+
+## Interactive Mode & Help Command
+
+### Interactive Mode
+
+Commander supports an intuitive interactive mode that guides users through DocType creation when information is missing.
+
+**How it works:**
+- If `doctype_name` is not provided, Commander prompts for it
+- If `fields` are not provided, Commander asks if you want to add fields
+- If `module` is not provided, Commander prompts for module selection
+- During field entry, type `help` for syntax assistance
+- Type `done` or leave empty to finish adding fields
+
+**Example Interactive Session:**
+
+```bash
+$ bench --site mysite new-doctype
+
+📝 Enter DocType name: Product
+
+📦 Module selection:
+   Enter module name (or press Enter for 'Custom')
+   Module [Custom]: Inventory
+
+✨ Creating DocType: Product
+📦 Module: Inventory
+
+❓ Add fields now? [Y/n]: y
+
+🔧 Adding fields (leave empty to finish):
+💡 Field definition examples:
+   • name:Data:*                    (required text field)
+   • email:Data:*:unique            (required unique text)
+   • price:Currency:?=0             (currency with default)
+   • status:Select:options=Open,Closed  (dropdown)
+   • customer:Link:options=Customer (link to DocType)
+   • description:Text:readonly      (read-only text)
+
+   Format: <fieldname>:<fieldtype>[:attributes...]
+   Type 'help' for more details, 'done' when finished
+
+   Field 1: product_name:Data:*
+   ✓ Added: product_name:Data:*
+
+   Field 2: price:Currency:?=0
+   ✓ Added: price:Currency:?=0
+
+   Field 3: category:Select:options=Electronics,Clothing
+   ✓ Added: category:Select:options=Electronics,Clothing
+
+   Field 4: [Enter]
+
+✅ DocType 'Product' created successfully in module 'Inventory'.
+   Added 3 field(s).
+```
+
+**Interactive Features:**
+- **Smart Prompts:** Only prompts for missing information
+- **Field Validation:** Validates each field as you enter it
+- **Inline Help:** Type `help` during field entry for detailed syntax
+- **Error Recovery:** Clear error messages with suggestions
+- **Flexible Flow:** Skip fields, add later, or finish anytime
+
+**Disabling Interactive Mode:**
+
+Use `--no-interact` flag to disable prompts and fail if required info is missing:
+
+```bash
+bench --site mysite new-doctype "Product" --no-interact
+# Fails if fields not provided
+```
+
+---
+
+### Help Command
+
+Commander provides a comprehensive `help` command with detailed documentation and examples.
+
+**Basic Usage:**
+
+```bash
+# Show full help
+bench help
+
+# Show field types only
+bench help --field-types
+
+# Show examples only
+bench help --examples
+```
+
+**Help Command Features:**
+
+1. **Quick Start Guide**
+   - Basic usage examples
+   - Common patterns
+   - Installation instructions
+
+2. **Field Type Documentation**
+   - All 11 supported field types
+   - Descriptions and use cases
+   - Example syntax for each type
+
+3. **Attribute Reference**
+   - Required (`*`)
+   - Unique constraint
+   - Read-only fields
+   - Options syntax
+   - Default values
+
+4. **Usage Examples**
+   - E-commerce scenarios
+   - CRM examples
+   - Project management
+   - Common patterns
+
+5. **Interactive Mode Guide**
+   - How to use interactive prompts
+   - Field entry tips
+   - Help during entry
+
+**Help During Interactive Mode:**
+
+While adding fields interactively, you can get context-sensitive help:
+
+```bash
+   Field 1: help
+
+============================================================
+FIELD DEFINITION HELP
+============================================================
+
+📋 Supported Field Types:
+   • Check         - Boolean checkbox
+   • Currency      - Currency amount
+   • Data          - Short text field (up to 140 characters)
+   ...
+```
+
+**Command Help:**
+
+Each command also has built-in help via Click:
+
+```bash
+bench new-doctype --help
+bench help --help
+```
 
 ---
 
@@ -883,10 +1062,10 @@ bench new-doctype "Product" ... --generate-controller
 # Creates: apps/custom/custom/doctype/product/product.py
 ```
 
-**5. Interactive Mode**
+**5. Enhanced Field Attributes**
 ```bash
-bench new-doctype --interactive
-# Prompts for: name, module, fields one by one
+# Add more field attributes like help text, depends_on, etc.
+bench new-doctype "Product" -f "name:Data:*:help=Product name"
 ```
 
 **6. JSON/YAML Import**
