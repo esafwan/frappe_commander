@@ -150,6 +150,28 @@ bench --site mysite new-doctype "Task" \
 
 Commander allows you to add custom fields to **standard Frappe DocTypes** (like Customer, Sales Invoice, Item, etc.) without modifying their JSON files. Custom fields are stored separately and persist across Frappe updates.
 
+### Quick Reference
+
+```bash
+# Simplest: Just fieldname and type (placed at end)
+bench --site mysite add-custom-field "Customer" -f "notes:Text"
+
+# Recommended: With positioning
+bench --site mysite add-custom-field "Customer" \
+  -f "notes:Text" \
+  --insert-after "customer_name"
+
+# Required field
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "delivery_date:Date:*" \
+  --insert-after "posting_date"
+
+# Field in list view
+bench --site mysite add-custom-field "Item" \
+  -f "batch_no:Data:inlist" \
+  --insert-after "item_name"
+```
+
 ### Why Custom Fields?
 
 - ✅ **Safe**: Standard DocType JSON files remain untouched
@@ -157,163 +179,235 @@ Commander allows you to add custom fields to **standard Frappe DocTypes** (like 
 - ✅ **Flexible**: Full control over field properties and positioning
 - ✅ **Version Control**: Can be exported and synced via fixtures
 
-### Basic Custom Field Examples
+### Sensible Defaults
 
-#### Add Simple Fields to Standard DocTypes
+Commander applies sensible defaults automatically:
+
+- ✅ **Fieldname**: Auto-prefixed with `custom_` if not already prefixed
+- ✅ **Label**: Auto-generated from fieldname (e.g., `notes` → `Notes`, `custom_notes` → `Custom Notes`)
+- ✅ **Position**: Placed at the end of the form if `--insert-after` is not specified
+- ✅ **Visibility**: Field is visible (not hidden) by default
+- ✅ **List View**: Field is not shown in list view by default
+- ✅ **Standard Filter**: Field is not in standard filter by default
+
+### Quick Start: Simple Examples
+
+These examples show the simplest way to add custom fields. All defaults are applied automatically.
 
 ```bash
-# Add notes field to Customer
-bench --site mysite add-custom-field "Customer" \
-  -f "custom_notes:Text"
+# Minimal: Just fieldname and type (placed at end, auto-prefixed with custom_)
+bench --site mysite add-custom-field "Customer" -f "notes:Text"
 
-# Add required field with positioning
+# With positioning (recommended for better UX)
+bench --site mysite add-custom-field "Customer" \
+  -f "notes:Text" \
+  --insert-after "customer_name"
+
+# Required field
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_delivery_instructions:Text:*" \
+  -f "delivery_instructions:Text:*" \
   --insert-after "customer"
 
-# Add field visible in list view
+# Field visible in list view
 bench --site mysite add-custom-field "Item" \
-  -f "custom_batch_no:Data:unique:inlist" \
+  -f "batch_no:Data:inlist" \
+  --insert-after "item_name"
+
+# Multiple attributes: required + unique + in list
+bench --site mysite add-custom-field "Item" \
+  -f "batch_no:Data:*:unique:inlist" \
   --insert-after "item_name"
 ```
 
-#### Advanced Custom Field Examples
+**Note**: You don't need to prefix fieldnames with `custom_` - Commander does this automatically. Both `notes:Text` and `custom_notes:Text` work the same way.
+
+### Detailed Examples: Full Control
+
+These examples show advanced usage with all available options.
+
+#### Field with Description and Help Text
 
 ```bash
-# Add field with description and help text
 bench --site mysite add-custom-field "Customer" \
-  -f "custom_tax_id:Data:*:desc=Tax identification number" \
+  -f "tax_id:Data:*:desc=Tax identification number for compliance" \
   --insert-after "customer_name"
+```
 
-# Add field with dependencies (conditional display)
+#### Conditional Field (Dependencies)
+
+```bash
+# Show field only when checkbox is checked
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_discount_percent:Percent:depends_on=eval:doc.apply_discount==1" \
-  --insert-after "grand_total"
+  -f "discount_reason:Text:depends_on=eval:doc.apply_discount==1" \
+  --insert-after "discount_amount"
 
-# Add field that fetches from linked document
+# Show field based on status
+bench --site mysite add-custom-field "Sales Order" \
+  -f "cancellation_reason:Text:depends_on=eval:doc.status=='Cancelled'" \
+  --insert-after "status"
+```
+
+#### Fetch Value from Linked Document
+
+```bash
+# Fetch customer email from Customer DocType
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "customer_email:Data:fetch_from=customer.email_id" \
+  --insert-after "customer"
+
+# Fetch item category from Item DocType
 bench --site mysite add-custom-field "Sales Invoice Item" \
-  -f "custom_item_category:Data:fetch_from=item.custom_category" \
+  -f "item_category:Data:fetch_from=item.custom_category" \
   --insert-after "item_code"
+```
 
-# Add field with width and precision
+#### Numeric Field with Precision and Width
+
+```bash
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_service_charge:Currency:width=150:precision=2:?=0" \
-  --insert-after "taxes_and_charges_total"
+  -f "service_charge:Currency:?=0:width=150:precision=2" \
+  --insert-after "grand_total"
+```
 
-# Add translatable field
-bench --site mysite add-custom-field "Item" \
-  -f "custom_local_name:Data:translatable" \
-  --insert-after "item_name"
+#### Select Field with Options and Styling
+
+```bash
+bench --site mysite add-custom-field "Customer" \
+  -f "segment:Select:options=Enterprise,SMB,Startup:bold:translatable:inlist" \
+  --insert-after "customer_name"
+```
+
+#### Hidden Field (Internal Use Only)
+
+```bash
+bench --site mysite add-custom-field "Customer" \
+  -f "internal_notes:Text:hidden:desc=Internal team notes only"
+```
+
+#### Read-only Field with Default
+
+```bash
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "invoice_number:Data:*:readonly:?=AUTO" \
+  --insert-after "name"
 ```
 
 ### Real-World Examples: Extending Standard DocTypes
 
+Complete examples showing how to extend common Frappe DocTypes.
+
 #### Extend Customer DocType
 
 ```bash
-# Add customer segment
+# Customer segment (simple)
 bench --site mysite add-custom-field "Customer" \
-  -f "custom_segment:Select:options=Enterprise,SMB,Startup:inlist" \
+  -f "segment:Select:options=Enterprise,SMB,Startup:inlist" \
   --insert-after "customer_name"
 
-# Add credit limit
+# Credit limit (with formatting)
 bench --site mysite add-custom-field "Customer" \
-  -f "custom_credit_limit:Currency:width=150:precision=2:?=0" \
+  -f "credit_limit:Currency:width=150:precision=2:?=0" \
   --insert-after "credit_limit"
 
-# Add internal notes (hidden from customer portal)
+# Internal notes (hidden from portal)
 bench --site mysite add-custom-field "Customer" \
-  -f "custom_internal_notes:Text:hidden:desc=Internal team notes only"
+  -f "internal_notes:Text:hidden:desc=Internal team notes only"
 ```
 
 #### Extend Sales Invoice DocType
 
 ```bash
-# Add delivery date
+# Delivery date (required)
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_delivery_date:Date:*" \
+  -f "delivery_date:Date:*" \
   --insert-after "posting_date"
 
-# Add delivery instructions
+# Delivery instructions
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_delivery_instructions:Text:desc=Special delivery instructions" \
+  -f "delivery_instructions:Text:desc=Special delivery instructions" \
   --insert-after "shipping_address"
 
-# Add discount approval (conditional)
+# Discount approval (conditional - shows only for large discounts)
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_discount_approved_by:Link:options=User:depends_on=eval:doc.discount_amount>1000" \
+  -f "discount_approved_by:Link:options=User:depends_on=eval:doc.discount_amount>1000" \
   --insert-after "discount_amount"
 
-# Add project reference
+# Project reference
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_project:Link:options=Project" \
+  -f "project:Link:options=Project" \
   --insert-after "customer"
 ```
 
 #### Extend Item DocType
 
 ```bash
-# Add batch tracking
+# Batch tracking flag
 bench --site mysite add-custom-field "Item" \
-  -f "custom_batch_required:Check:?=0:inlist" \
+  -f "batch_required:Check:?=0:inlist" \
   --insert-after "has_batch_no"
 
-# Add expiry date tracking
+# Expiry tracking flag
 bench --site mysite add-custom-field "Item" \
-  -f "custom_expiry_tracking:Check:?=0" \
+  -f "expiry_tracking:Check:?=0" \
   --insert-after "has_expiry_date"
 
-# Add custom category
+# Custom category (with styling)
 bench --site mysite add-custom-field "Item" \
-  -f "custom_category:Select:options=Premium,Standard,Economy:inlist:bold" \
+  -f "category:Select:options=Premium,Standard,Economy:inlist:bold" \
   --insert-after "item_group"
 
-# Add supplier part number
+# Supplier part number
 bench --site mysite add-custom-field "Item" \
-  -f "custom_supplier_part_no:Data:desc=Supplier's part number" \
+  -f "supplier_part_no:Data:desc=Supplier's part number" \
   --insert-after "item_code"
 ```
 
 #### Extend Sales Order DocType
 
 ```bash
-# Add expected delivery date
+# Expected delivery date
 bench --site mysite add-custom-field "Sales Order" \
-  -f "custom_expected_delivery:Date:*" \
+  -f "expected_delivery:Date:*" \
   --insert-after "delivery_date"
 
-# Add priority level
+# Priority level (with default)
 bench --site mysite add-custom-field "Sales Order" \
-  -f "custom_priority:Select:options=Low,Medium,High,Urgent:?=Medium:inlist:bold" \
+  -f "priority:Select:options=Low,Medium,High,Urgent:?=Medium:inlist:bold" \
   --insert-after "status"
 
-# Add special instructions
+# Special instructions (wide field)
 bench --site mysite add-custom-field "Sales Order" \
-  -f "custom_special_instructions:Text:width=500" \
+  -f "special_instructions:Text:width=500" \
   --insert-after "terms"
 ```
 
 ### Field Positioning
 
-Use `--insert-after` to control where your custom field appears in the form:
+Use `--insert-after` to control where your custom field appears in the form. If not specified, the field is placed at the end.
 
 ```bash
-# Insert after a specific field
+# Insert after a specific field (recommended)
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_field:Data" \
+  -f "field:Data" \
   --insert-after "customer"
 
 # Or use insert_after in field definition
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_field:Data:insert_after=customer"
+  -f "field:Data:insert_after=customer"
+
+# No positioning = placed at end (default)
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "field:Data"
 ```
 
 **Common positioning targets:**
-- `customer` - After customer field
+- `customer` / `customer_name` - After customer field
 - `item_code` - After item code
 - `grand_total` - After grand total
 - `status` - After status field
 - `name` - At the beginning (after name field)
+- `posting_date` - After posting date
+- `shipping_address` - After shipping address
 
 ### Field Dependencies
 
@@ -353,34 +447,41 @@ bench --site mysite add-custom-field "Sales Invoice Item" \
 
 ### Best Practices
 
-1. **Always use `custom_` prefix** for field names (auto-added if omitted)
+1. **Don't worry about `custom_` prefix** - Commander adds it automatically
    ```bash
-   # Good - explicit prefix
-   -f "custom_notes:Text"
-   
-   # Also good - prefix added automatically
-   -f "notes:Text"
+   # Both work the same way
+   -f "notes:Text"           # Auto-prefixed to custom_notes
+   -f "custom_notes:Text"    # Explicit prefix (also works)
    ```
 
-2. **Position fields logically** using `--insert-after`
+2. **Always position fields** using `--insert-after` for better UX
    ```bash
    # Group related fields together
-   --insert-after "customer"  # Customer-related fields
-   --insert-after "grand_total"  # Financial fields
+   --insert-after "customer"      # Customer-related fields
+   --insert-after "grand_total"   # Financial fields
+   --insert-after "status"        # Status-related fields
    ```
 
-3. **Use descriptions** for clarity
+3. **Use descriptions** for clarity and help text
    ```bash
-   -f "custom_field:Data:desc=Explain what this field is for"
+   -f "field:Data:desc=Explain what this field is for"
    ```
 
 4. **Test field dependencies** carefully
    ```bash
-   # Always test depends_on expressions
-   -f "custom_field:Data:depends_on=eval:doc.status=='Active'"
+   # Always test depends_on expressions in Desk UI after creation
+   -f "field:Data:depends_on=eval:doc.status=='Active'"
    ```
 
-5. **Refresh browser** after adding custom fields to see changes
+5. **Refresh browser** after adding custom fields to see changes immediately
+
+6. **Start simple, then enhance** - Add basic fields first, then add attributes as needed
+   ```bash
+   # Step 1: Add basic field
+   bench --site mysite add-custom-field "Customer" -f "notes:Text" --insert-after "customer_name"
+   
+   # Step 2: Later, if needed, you can enhance it via Desk UI or recreate with more options
+   ```
 
 ### Limitations
 
@@ -465,19 +566,27 @@ bench --site mysite new-doctype "Simple DocType"
 # Show help
 bench add-custom-field --help
 
-# Basic usage
-bench --site mysite add-custom-field "DocType Name" \
-  -f "fieldname:FieldType:attributes" \
-  --insert-after "target_field"
+# SIMPLE: Minimal command (all defaults applied)
+bench --site mysite add-custom-field "Customer" -f "notes:Text"
 
-# Examples
+# RECOMMENDED: With positioning
 bench --site mysite add-custom-field "Customer" \
-  -f "custom_notes:Text" \
+  -f "notes:Text" \
   --insert-after "customer_name"
 
+# DETAILED: Full control with all options
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_delivery_date:Date:*:inlist" \
+  -f "delivery_date:Date:*:inlist:desc=Expected delivery date" \
   --insert-after "posting_date"
+
+# More examples
+bench --site mysite add-custom-field "Item" \
+  -f "batch_no:Data:*:unique:inlist" \
+  --insert-after "item_name"
+
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "discount_reason:Text:depends_on=eval:doc.apply_discount==1" \
+  --insert-after "discount_amount"
 ```
 
 ## Limitations

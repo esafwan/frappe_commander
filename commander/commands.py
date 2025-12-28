@@ -246,7 +246,15 @@ def add_custom_field(doctype_name, field_dict):
         field_dict: Dictionary with field properties
     
     Returns:
-        Name of the created custom field
+        Name of the created custom field (with custom_ prefix if auto-added)
+    
+    Defaults applied:
+    - Fieldname is auto-prefixed with 'custom_' if not already prefixed
+    - Label is auto-generated from fieldname if not provided
+    - Field is positioned at the end if insert_after is not specified
+    - Field is visible (not hidden) by default
+    - Field is not in list view by default
+    - Field is not in standard filter by default
     """
     # Validate DocType exists
     if not frappe.db.exists("DocType", doctype_name):
@@ -260,25 +268,34 @@ def add_custom_field(doctype_name, field_dict):
     if dt.get("issingle"):
         raise Exception(f"Cannot add custom fields to Single DocType '{doctype_name}'.")
     
-    # Check if custom field already exists
-    # Frappe automatically prefixes fieldnames with 'custom_' if not already prefixed
+    # Apply sensible defaults
+    # Frappe's create_custom_field will handle:
+    # - Auto-prefixing fieldname with 'custom_' if not prefixed
+    # - Auto-generating label from fieldname if not provided
+    # - Auto-calculating idx if insert_after is not provided (places at end)
+    
+    # Normalize fieldname for existence check (Frappe will prefix it)
     fieldname = field_dict.get("fieldname", "")
     normalized_fieldname = fieldname
-    if not normalized_fieldname.startswith("custom_"):
+    if normalized_fieldname and not normalized_fieldname.startswith("custom_"):
         normalized_fieldname = f"custom_{normalized_fieldname}"
     
     # Check for both prefixed and non-prefixed versions
-    existing = frappe.db.exists(
-        "Custom Field",
-        {"dt": doctype_name, "fieldname": normalized_fieldname}
-    ) or frappe.db.exists(
-        "Custom Field",
-        {"dt": doctype_name, "fieldname": fieldname}
-    )
+    existing = False
+    if normalized_fieldname:
+        existing = frappe.db.exists(
+            "Custom Field",
+            {"dt": doctype_name, "fieldname": normalized_fieldname}
+        )
+    if not existing and fieldname:
+        existing = frappe.db.exists(
+            "Custom Field",
+            {"dt": doctype_name, "fieldname": fieldname}
+        )
     
     if existing:
         raise Exception(
-            f"Custom field '{normalized_fieldname}' already exists on DocType '{doctype_name}'. "
+            f"Custom field '{normalized_fieldname or fieldname}' already exists on DocType '{doctype_name}'. "
             f"Use 'update-custom-field' or delete it first."
         )
     
@@ -292,17 +309,39 @@ def add_custom_field(doctype_name, field_dict):
             "dt": doctype_name,
             **field_dict
         })
+        # Frappe will auto-prefix fieldname and set defaults
         cf.insert()
         frappe.db.commit()
-        return cf.name
+        return cf.fieldname
     
     # Use Frappe's create_custom_field API
-    # This handles fieldname prefixing, idx calculation, and DB updates
+    # This handles:
+    # - Fieldname prefixing (adds 'custom_' if not present)
+    # - Label generation (from fieldname if not provided)
+    # - idx calculation (from insert_after or end of form)
+    # - Database schema updates
     create_custom_field(doctype_name, field_dict)
     frappe.db.commit()
     
-    # Return the fieldname (may be prefixed with custom_)
-    return field_dict.get("fieldname", fieldname)
+    # Return the actual fieldname (Frappe may have prefixed it)
+    # Get the actual fieldname from the created Custom Field
+    actual_fieldname = field_dict.get("fieldname", "")
+    if actual_fieldname and not actual_fieldname.startswith("custom_"):
+        actual_fieldname = f"custom_{actual_fieldname}"
+    elif not actual_fieldname:
+        # If fieldname was generated from label, Frappe will have set it
+        # Query to get the actual fieldname
+        custom_fields = frappe.get_all(
+            "Custom Field",
+            filters={"dt": doctype_name},
+            fields=["fieldname"],
+            order_by="creation desc",
+            limit=1
+        )
+        if custom_fields:
+            actual_fieldname = custom_fields[0].fieldname
+    
+    return actual_fieldname or fieldname
 
 
 @click.command("add-custom-field")
@@ -314,7 +353,8 @@ def add_custom_field(doctype_name, field_dict):
 )
 @click.option(
     "--insert-after",
-    help="Field name to insert this field after (for positioning)"
+    default=None,
+    help="Field name to insert this field after (defaults to end of form if not specified)"
 )
 @pass_context
 def add_custom_field_cmd(context, doctype_name, field, insert_after):
@@ -324,30 +364,71 @@ def add_custom_field_cmd(context, doctype_name, field, insert_after):
     This command adds fields to standard DocTypes without modifying their JSON files.
     Custom fields are stored separately and merged at runtime.
     
-    Examples:
+    \b
+    SENSIBLE DEFAULTS:
+    - Fieldname is auto-prefixed with 'custom_' if not already prefixed
+    - Label is auto-generated from fieldname (e.g., 'custom_notes' -> 'Custom Notes')
+    - Field is positioned at the end if --insert-after is not specified
+    - Field is visible (not hidden) by default
+    - Field is not in list view by default
     
     \b
-    # Add a simple text field
+    SIMPLE EXAMPLES:
+    
+    \b
+    # Minimal: Just fieldname and type (placed at end)
+    bench --site mysite add-custom-field "Customer" -f "notes:Text"
+    
+    \b
+    # With positioning (recommended)
     bench --site mysite add-custom-field "Customer" \\
-      -f "custom_notes:Text"
+      -f "notes:Text" \\
+      --insert-after "customer_name"
     
     \b
-    # Add required field with positioning
+    # Required field
     bench --site mysite add-custom-field "Sales Invoice" \\
-      -f "custom_delivery_notes:Text:*" \\
+      -f "delivery_instructions:Text:*" \\
       --insert-after "customer"
     
     \b
-    # Add field with all options
+    # Field visible in list view
     bench --site mysite add-custom-field "Item" \\
-      -f "custom_batch_no:Data:*:unique:inlist:desc=Batch number" \\
+      -f "batch_no:Data:inlist" \\
       --insert-after "item_name"
     
     \b
-    # Add field with dependencies
+    DETAILED EXAMPLES:
+    
+    \b
+    # Full control: required, unique, in list, with description
+    bench --site mysite add-custom-field "Item" \\
+      -f "batch_no:Data:*:unique:inlist:desc=Batch number for tracking" \\
+      --insert-after "item_name"
+    
+    \b
+    # Conditional field (shows only when condition is met)
     bench --site mysite add-custom-field "Sales Invoice" \\
-      -f "custom_discount_percent:Percent:depends_on=eval:doc.apply_discount" \\
+      -f "discount_reason:Text:depends_on=eval:doc.apply_discount==1" \\
+      --insert-after "discount_amount"
+    
+    \b
+    # Fetch value from linked document
+    bench --site mysite add-custom-field "Sales Invoice" \\
+      -f "customer_email:Data:fetch_from=customer.email_id" \\
+      --insert-after "customer"
+    
+    \b
+    # Numeric field with precision and width
+    bench --site mysite add-custom-field "Sales Invoice" \\
+      -f "service_charge:Currency:?=0:width=150:precision=2" \\
       --insert-after "grand_total"
+    
+    \b
+    # Select field with options, bold label, translatable
+    bench --site mysite add-custom-field "Customer" \\
+      -f "segment:Select:options=Enterprise,SMB,Startup:bold:translatable:inlist" \\
+      --insert-after "customer_name"
     """
     site = get_site(context)
     
