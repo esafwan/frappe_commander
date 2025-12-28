@@ -210,7 +210,45 @@ def add_custom_field_to_doctype(doctype_name, field_dict, insert_after=None):
     return fieldname
 
 
-def set_property_on_doctype(doctype_name, property_name, value, property_type, field_name=None):
+def infer_property_type(property_name, value):
+    """
+    Infer property type from property name and value.
+    
+    Common boolean properties default to 'Check'.
+    If value is '0' or '1', assume 'Check'.
+    Otherwise, try to infer from property name patterns.
+    """
+    # Common boolean/check properties
+    boolean_properties = {
+        'reqd', 'hidden', 'read_only', 'allow_copy', 'track_changes',
+        'allow_rename', 'allow_import', 'allow_export', 'allow_print',
+        'allow_email', 'allow_share', 'in_list_view', 'in_standard_filter',
+        'bold', 'collapsible', 'ignore_user_permissions', 'no_copy',
+        'permlevel', 'search_index', 'translatable', 'unique'
+    }
+    
+    if property_name.lower() in boolean_properties:
+        return 'Check'
+    
+    # If value is 0 or 1, likely a Check field
+    if value in ('0', '1', 'true', 'false', 'True', 'False'):
+        return 'Check'
+    
+    # Try to infer from value type
+    if value.isdigit():
+        return 'Int'
+    
+    try:
+        float(value)
+        return 'Float'
+    except ValueError:
+        pass
+    
+    # Default to Data for unknown types
+    return 'Data'
+
+
+def set_property_on_doctype(doctype_name, property_name, value, property_type=None, field_name=None):
     """
     Create a property setter for a DocType or DocField.
     
@@ -218,11 +256,15 @@ def set_property_on_doctype(doctype_name, property_name, value, property_type, f
         doctype_name: Name of the DocType
         property_name: Property to set (e.g., 'reqd', 'hidden', 'read_only')
         value: Value to set
-        property_type: Type of property ('Check', 'Data', 'Int', etc.)
+        property_type: Type of property ('Check', 'Data', 'Int', etc.). If None, will be inferred.
         field_name: Field name if setting field property (None for DocType property)
     """
     if not frappe.db.exists("DocType", doctype_name):
         raise Exception(f"DocType '{doctype_name}' does not exist.")
+    
+    # Infer property type if not provided
+    if property_type is None:
+        property_type = infer_property_type(property_name, value)
     
     # Use Frappe's make_property_setter
     frappe.make_property_setter(
@@ -293,11 +335,11 @@ def customize_doctype_cmd(context, doctype_name, fields, insert_after):
 )
 @click.option(
     "--value", required=True,
-    help="Value to set for the property."
+    help="Value to set for the property (e.g., '1' or '0' for Check fields)."
 )
 @click.option(
-    "--property-type", required=True,
-    help="Property type: 'Check', 'Data', 'Int', 'Select', etc."
+    "--property-type", default=None,
+    help="Property type: 'Check', 'Data', 'Int', 'Select', etc. (auto-detected if omitted)."
 )
 @click.option(
     "--field", default=None,
@@ -308,20 +350,26 @@ def set_property_cmd(context, doctype_name, property, value, property_type, fiel
     """
     Set a property on a DocType or DocField using Property Setter.
     
+    Property type is auto-detected for common properties (reqd, hidden, etc.).
+    For boolean properties, use '1' for true and '0' for false.
+    
     Examples:
-        # Make a field required
+        # Simple: Make a field required (property-type auto-detected)
         bench --site mysite set-property "Sales Invoice" \\
-            --property "reqd" --value "1" --property-type "Check" \\
+            --property "reqd" --value "1" --field "customer"
+        
+        # Simple: Hide a field
+        bench --site mysite set-property "Sales Invoice" \\
+            --property "hidden" --value "1" --field "remarks"
+        
+        # Simple: Enable copy on DocType
+        bench --site mysite set-property "Sales Invoice" \\
+            --property "allow_copy" --value "1"
+        
+        # Detailed: Explicit property type
+        bench --site mysite set-property "Sales Invoice" \\
+            --property "label" --value "Invoice" --property-type "Data" \\
             --field "customer"
-        
-        # Enable copy on DocType
-        bench --site mysite set-property "Sales Invoice" \\
-            --property "allow_copy" --value "1" --property-type "Check"
-        
-        # Hide a field
-        bench --site mysite set-property "Sales Invoice" \\
-            --property "hidden" --value "1" --property-type "Check" \\
-            --field "remarks"
     """
     site = get_site(context)
     
@@ -329,9 +377,11 @@ def set_property_cmd(context, doctype_name, property, value, property_type, fiel
         frappe.connect()
         
         try:
-            set_property_on_doctype(doctype_name, property, value, property_type, field)
+            inferred_type = infer_property_type(property, value) if property_type is None else property_type
+            set_property_on_doctype(doctype_name, property, value, inferred_type, field)
             target = f"field '{field}'" if field else "DocType"
-            click.echo(f"Set property '{property}' = '{value}' on {target} of '{doctype_name}'.")
+            type_info = f" (type: {inferred_type})" if property_type is None else ""
+            click.echo(f"Set property '{property}' = '{value}' on {target} of '{doctype_name}'{type_info}.")
         except Exception as e:
             click.echo(f"Error setting property: {e}", err=True)
             raise
