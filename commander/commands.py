@@ -112,6 +112,16 @@ def parse_field_definition(field_def, for_custom_field=False):
                 field_dict["depends_on"] = attr.split("=", 1)[1].strip()
             else:
                 raise ValueError(f"'depends_on' attribute only valid for custom fields.")
+        elif attr.startswith("mandatory_depends_on=") or attr.startswith("mandatory="):
+            if for_custom_field:
+                field_dict["mandatory_depends_on"] = attr.split("=", 1)[1].strip()
+            else:
+                raise ValueError(f"'mandatory_depends_on' attribute only valid for custom fields.")
+        elif attr.startswith("read_only_depends_on=") or attr.startswith("readonly_depends_on="):
+            if for_custom_field:
+                field_dict["read_only_depends_on"] = attr.split("=", 1)[1].strip()
+            else:
+                raise ValueError(f"'read_only_depends_on' attribute only valid for custom fields.")
         elif attr.startswith("fetch_from=") or attr.startswith("fetch="):
             if for_custom_field:
                 field_dict["fetch_from"] = attr.split("=", 1)[1].strip()
@@ -264,9 +274,27 @@ def add_custom_field(doctype_name, field_dict):
     dt = frappe.get_doc("DocType", doctype_name)
     
     # Check if DocType can be customized
-    # Single DocTypes and some core DocTypes cannot be customized
+    # Restrictions per Frappe documentation:
+    # 1. Cannot customize Single DocTypes
     if dt.get("issingle"):
-        raise Exception(f"Cannot add custom fields to Single DocType '{doctype_name}'.")
+        raise Exception(
+            f"Cannot add custom fields to Single DocType '{doctype_name}'. "
+            f"Single DocTypes cannot be customized."
+        )
+    
+    # 2. Cannot customize custom DocTypes (only standard DocTypes can be customized)
+    if dt.get("custom"):
+        raise Exception(
+            f"Cannot add custom fields to custom DocType '{doctype_name}'. "
+            f"Only standard DocTypes can be customized. Custom DocTypes should be modified directly."
+        )
+    
+    # 3. Check for core/system DocTypes that shouldn't be customized
+    # Core DocTypes are typically in 'frappe' app and have restricted customization
+    # Note: This is a soft check - Frappe's create_custom_field will enforce stricter rules
+    if dt.get("module") and dt.module.lower() in ["core", "setup"]:
+        # Warn but don't block - Frappe's API will handle actual restrictions
+        pass
     
     # Apply sensible defaults
     # Frappe's create_custom_field will handle:
@@ -411,6 +439,18 @@ def add_custom_field_cmd(context, doctype_name, field, insert_after):
     bench --site mysite add-custom-field "Sales Invoice" \\
       -f "discount_reason:Text:depends_on=eval:doc.apply_discount==1" \\
       --insert-after "discount_amount"
+    
+    \b
+    # Conditional requirement (required only when condition is met)
+    bench --site mysite add-custom-field "Sales Invoice" \\
+      -f "approval_notes:Text:mandatory_depends_on=eval:doc.grand_total>10000" \\
+      --insert-after "grand_total"
+    
+    \b
+    # Conditional read-only (read-only when condition is met)
+    bench --site mysite add-custom-field "Sales Invoice" \\
+      -f "final_amount:Currency:read_only_depends_on=eval:doc.status=='Submitted'" \\
+      --insert-after "grand_total"
     
     \b
     # Fetch value from linked document

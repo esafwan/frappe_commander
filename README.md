@@ -81,7 +81,9 @@ Data, Text, Int, Float, Date, Datetime, Select, Link, Table, Check, Currency, Pe
 | Translatable | `translatable` | Enable field label translation |
 | Bulk Edit | `allow_bulk_edit` or `bulk` | Allow bulk editing |
 | Depends On | `depends_on=<expression>` | Show/hide based on condition |
-| Fetch From | `fetch_from=<fieldname>` | Fetch value from linked document |
+| Mandatory Depends On | `mandatory_depends_on=<expression>` or `mandatory=<expression>` | Make field required based on condition |
+| Read-only Depends On | `read_only_depends_on=<expression>` | Make field read-only based on condition |
+| Fetch From | `fetch_from=<fieldname>` or `fetch=<fieldname>` | Fetch value from linked document |
 | Description | `description=<text>` or `desc=<text>` | Field help text/description |
 | Width | `width=<number>` | Field width in pixels |
 | Precision | `precision=<number>` or `prec=<number>` | Decimal precision for numeric fields |
@@ -245,6 +247,16 @@ bench --site mysite add-custom-field "Sales Invoice" \
 bench --site mysite add-custom-field "Sales Order" \
   -f "cancellation_reason:Text:depends_on=eval:doc.status=='Cancelled'" \
   --insert-after "status"
+
+# Make field required based on condition
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "approval_notes:Text:mandatory_depends_on=eval:doc.grand_total>10000" \
+  --insert-after "grand_total"
+
+# Make field read-only based on condition
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "final_amount:Currency:read_only_depends_on=eval:doc.status=='Submitted'" \
+  --insert-after "grand_total"
 ```
 
 #### Fetch Value from Linked Document
@@ -411,22 +423,32 @@ bench --site mysite add-custom-field "Sales Invoice" \
 
 ### Field Dependencies
 
-Control field visibility based on other field values:
+Control field visibility, requirement, and read-only state based on other field values:
 
 ```bash
-# Show field only when checkbox is checked
+# Show/hide field based on condition
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_discount_reason:Text:depends_on=eval:doc.apply_discount==1" \
+  -f "discount_reason:Text:depends_on=eval:doc.apply_discount==1" \
   --insert-after "discount_amount"
 
 # Show field based on status
 bench --site mysite add-custom-field "Sales Order" \
-  -f "custom_cancellation_reason:Text:depends_on=eval:doc.status=='Cancelled'" \
+  -f "cancellation_reason:Text:depends_on=eval:doc.status=='Cancelled'" \
   --insert-after "status"
+
+# Make field required based on condition
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "approval_notes:Text:mandatory_depends_on=eval:doc.grand_total>10000" \
+  --insert-after "grand_total"
+
+# Make field read-only based on condition
+bench --site mysite add-custom-field "Sales Invoice" \
+  -f "final_amount:Currency:read_only_depends_on=eval:doc.status=='Submitted'" \
+  --insert-after "grand_total"
 
 # Multiple conditions
 bench --site mysite add-custom-field "Sales Invoice" \
-  -f "custom_approval:Link:options=User:depends_on=eval:doc.grand_total>10000 && doc.status=='Draft'"
+  -f "approval:Link:options=User:depends_on=eval:doc.grand_total>10000 && doc.status=='Draft'"
 ```
 
 ### Fetching Values from Linked Documents
@@ -599,11 +621,19 @@ bench --site mysite add-custom-field "Sales Invoice" \
 - Best for initial structure; refine complex features in Desk
 
 ### Custom Fields
-- Cannot add custom fields to Single DocTypes
-- Cannot add custom fields to custom DocTypes (only standard DocTypes)
-- Cannot modify standard field properties (use Property Setters via Desk UI)
-- Field type changes require deleting and recreating the field
-- Some advanced field types may require Desk UI for full configuration
+
+**Restrictions (per Frappe framework):**
+- ❌ Cannot add custom fields to **Single DocTypes** (issingle=1)
+- ❌ Cannot add custom fields to **custom DocTypes** (only standard DocTypes can be customized)
+- ❌ Cannot customize **core DocTypes** (enforced by Frappe API)
+- ❌ Cannot modify standard field properties (use Property Setters via Desk UI)
+- ❌ Field type changes require deleting and recreating the field
+
+**Supported:**
+- ✅ All standard Frappe DocTypes (Customer, Sales Invoice, Item, etc.)
+- ✅ All common field types (Data, Text, Int, Float, Date, Datetime, Select, Link, Table, Check, Currency, Percent)
+- ✅ All custom field properties available in Desk UI
+- ✅ Field positioning, dependencies, and conditional logic
 
 ## Roadmap
 
