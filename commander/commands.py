@@ -165,6 +165,46 @@ def new_doctype_cmd(context, doctype_name, fields, module, no_interact):
         click.echo(f"DocType '{new_dt}' created in module '{module}'.")
 
 
+def validate_customization_allowed(doctype_name):
+    """
+    Validate that a DocType can be customized according to Frappe restrictions.
+    
+    Restrictions:
+    - Cannot customize core DocTypes
+    - Cannot customize Single DocTypes
+    - Cannot customize custom DocTypes (only standard)
+    """
+    if not frappe.db.exists("DocType", doctype_name):
+        raise Exception(f"DocType '{doctype_name}' does not exist.")
+    
+    dt = frappe.get_doc("DocType", doctype_name)
+    
+    # Check if it's a core DocType (system DocTypes that shouldn't be customized)
+    core_doctypes = {"DocType", "DocField", "Custom Field", "Property Setter", "Customize Form"}
+    if dt.name in core_doctypes:
+        raise Exception(f"Cannot customize core DocType '{doctype_name}'.")
+    
+    # Check if it's a Single DocType
+    if dt.get("issingle"):
+        raise Exception(f"Cannot customize Single DocType '{doctype_name}'. Single DocTypes cannot be customized.")
+    
+    # Check if it's already a custom DocType (can only customize standard DocTypes)
+    if dt.get("custom"):
+        raise Exception(f"Cannot customize custom DocType '{doctype_name}'. Only standard DocTypes can be customized.")
+    
+    return dt
+
+
+def clear_doctype_cache(doctype_name):
+    """Clear metadata cache for a DocType after customization."""
+    try:
+        frappe.clear_cache(doctype=doctype_name)
+        frappe.cache().delete_key(f"doctype_meta::{doctype_name}")
+    except Exception:
+        # Cache clearing is best-effort, don't fail if it doesn't work
+        pass
+
+
 def add_custom_field_to_doctype(doctype_name, field_dict, insert_after=None):
     """
     Add a custom field to an existing DocType.
@@ -177,8 +217,8 @@ def add_custom_field_to_doctype(doctype_name, field_dict, insert_after=None):
     Returns:
         The fieldname of the created custom field
     """
-    if not frappe.db.exists("DocType", doctype_name):
-        raise Exception(f"DocType '{doctype_name}' does not exist.")
+    # Validate customization is allowed
+    validate_customization_allowed(doctype_name)
     
     # Ensure fieldname is prefixed with custom_ if not already
     fieldname = field_dict.get("fieldname", "")
@@ -206,6 +246,9 @@ def add_custom_field_to_doctype(doctype_name, field_dict, insert_after=None):
     # Update database schema
     frappe.db.updatedb(doctype_name)
     frappe.db.commit()
+    
+    # Clear cache after customization
+    clear_doctype_cache(doctype_name)
     
     return fieldname
 
@@ -248,9 +291,33 @@ def infer_property_type(property_name, value):
     return 'Data'
 
 
-def set_property_on_doctype(doctype_name, property_name, value, property_type=None, field_name=None):
+def validate_field_exists(doctype_name, field_name):
+    """Validate that a field exists in the DocType."""
+    if not field_name:
+        return True  # DocType-level property, no field validation needed
+    
+    dt = frappe.get_doc("DocType", doctype_name)
+    
+    # Check standard fields
+    standard_fields = [f.fieldname for f in dt.fields if not f.get("is_custom_field")]
+    if field_name in standard_fields:
+        return True
+    
+    # Check custom fields
+    custom_fields = frappe.db.get_all(
+        "Custom Field",
+        filters={"dt": doctype_name, "fieldname": field_name},
+        fields=["name"]
+    )
+    if custom_fields:
+        return True
+    
+    raise Exception(f"Field '{field_name}' does not exist in DocType '{doctype_name}'.")
+
+
+def set_property_on_doctype(doctype_name, property_name, value, property_type=None, field_name=None, row_name=None):
     """
-    Create a property setter for a DocType or DocField.
+    Create a property setter for a DocType, DocField, or DocType Link/Action/State.
     
     Args:
         doctype_name: Name of the DocType
@@ -258,24 +325,57 @@ def set_property_on_doctype(doctype_name, property_name, value, property_type=No
         value: Value to set
         property_type: Type of property ('Check', 'Data', 'Int', etc.). If None, will be inferred.
         field_name: Field name if setting field property (None for DocType property)
+        row_name: Row name for DocType Link/Action/State (None for DocType/DocField)
     """
-    if not frappe.db.exists("DocType", doctype_name):
-        raise Exception(f"DocType '{doctype_name}' does not exist.")
+    # Validate customization is allowed (only for standard DocTypes)
+    dt = validate_customization_allowed(doctype_name)
+    
+    # Validate field exists if setting field property
+    if field_name:
+        validate_field_exists(doctype_name, field_name)
     
     # Infer property type if not provided
     if property_type is None:
         property_type = infer_property_type(property_name, value)
     
-    # Use Frappe's make_property_setter
-    frappe.make_property_setter(
-        doctype=doctype_name,
-        fieldname=field_name,
-        property=property_name,
-        value=value,
-        property_type=property_type,
-        for_doctype=(field_name is None)
-    )
+    # Use Frappe's make_property_setter (supports DocType and DocField)
+    # For DocType Link/Action/State, we need to create Property Setter manually
+    if row_name:
+        # Create Property Setter for DocType Link/Action/State manually
+        # Try to infer doctype_or_field from property name or default to DocType Link
+        if "action" in property_name.lower():
+            doctype_or_field = "DocType Action"
+        elif "state" in property_name.lower():
+            doctype_or_field = "DocType State"
+        else:
+            doctype_or_field = "DocType Link"  # Default
+        
+        # Create Property Setter document directly
+        ps = frappe.new_doc("Property Setter")
+        ps.update({
+            "doc_type": doctype_name,
+            "doctype_or_field": doctype_or_field,
+            "row_name": row_name,
+            "property": property_name,
+            "property_type": property_type,
+            "value": value
+        })
+        ps.insert()
+    else:
+        # Use Frappe's make_property_setter for DocType and DocField
+        frappe.make_property_setter(
+            doctype=doctype_name,
+            fieldname=field_name,
+            property=property_name,
+            value=value,
+            property_type=property_type,
+            for_doctype=(field_name is None)
+        )
+    
     frappe.db.commit()
+    
+    # Clear cache after customization
+    clear_doctype_cache(doctype_name)
 
 
 @click.command("customize-doctype")
@@ -292,6 +392,11 @@ def set_property_on_doctype(doctype_name, property_name, value, property_type=No
 def customize_doctype_cmd(context, doctype_name, fields, insert_after):
     """
     Add custom fields to an existing DocType.
+    
+    Restrictions:
+    - Only standard DocTypes can be customized (not custom DocTypes)
+    - Cannot customize Single DocTypes
+    - Cannot customize core DocTypes (DocType, DocField, etc.)
     
     Example:
         bench --site mysite customize-doctype "Sales Invoice" \\
@@ -345,10 +450,20 @@ def customize_doctype_cmd(context, doctype_name, fields, insert_after):
     "--field", default=None,
     help="Field name if setting field property (omit for DocType-level property)."
 )
+@click.option(
+    "--row-name", default=None,
+    help="Row name for DocType Link/Action/State properties (omit for DocType/DocField properties)."
+)
 @pass_context
-def set_property_cmd(context, doctype_name, property, value, property_type, field):
+def set_property_cmd(context, doctype_name, property, value, property_type, field, row_name):
     """
-    Set a property on a DocType or DocField using Property Setter.
+    Set a property on a DocType, DocField, or DocType Link/Action/State using Property Setter.
+    
+    Restrictions:
+    - Only standard DocTypes can be customized (not custom DocTypes)
+    - Cannot customize Single DocTypes
+    - Cannot customize core DocTypes
+    - Field must exist before setting its properties
     
     Property type is auto-detected for common properties (reqd, hidden, etc.).
     For boolean properties, use '1' for true and '0' for false.
@@ -368,7 +483,7 @@ def set_property_cmd(context, doctype_name, property, value, property_type, fiel
         
         # Detailed: Explicit property type
         bench --site mysite set-property "Sales Invoice" \\
-            --property "label" --value "Invoice" --property-type "Data" \\
+            --property "label" --value "Customer Name" --property-type "Data" \\
             --field "customer"
     """
     site = get_site(context)
@@ -378,8 +493,16 @@ def set_property_cmd(context, doctype_name, property, value, property_type, fiel
         
         try:
             inferred_type = infer_property_type(property, value) if property_type is None else property_type
-            set_property_on_doctype(doctype_name, property, value, inferred_type, field)
-            target = f"field '{field}'" if field else "DocType"
+            set_property_on_doctype(doctype_name, property, value, inferred_type, field, row_name)
+            
+            # Determine target description
+            if row_name:
+                target = f"row '{row_name}'"
+            elif field:
+                target = f"field '{field}'"
+            else:
+                target = "DocType"
+            
             type_info = f" (type: {inferred_type})" if property_type is None else ""
             click.echo(f"Set property '{property}' = '{value}' on {target} of '{doctype_name}'{type_info}.")
         except Exception as e:
