@@ -382,7 +382,7 @@ bench --site mysite new-doctype "Task" \
 - User-friendly error messages and validation
 
 **7. Comprehensive Help System**
-- Dedicated `help` command with examples and guides
+- Dedicated `commander-help` command with examples and guides
 - Field type documentation and syntax help
 - Usage examples for common scenarios
 - Context-sensitive help during interactive mode
@@ -465,7 +465,7 @@ bench --site mysite new-doctype "Product" --no-interact
 
 ### Help Command
 
-Commander provides a comprehensive `help` command with detailed documentation and examples.
+Commander provides a comprehensive `commander-help` command with detailed documentation and examples.
 
 **Basic Usage:**
 
