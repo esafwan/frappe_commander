@@ -728,6 +728,429 @@ def add_property_setter_api(
 
 
 # ============================================================================
+# Simplified Customize Form Endpoint
+# ============================================================================
+
+
+# Property name mapping: user-friendly -> Frappe internal
+PROPERTY_NAME_MAP = {
+	# Field properties
+	"required": "reqd",
+	"readonly": "read_only",
+	"read_only": "read_only",
+	"hidden": "hidden",
+	"label": "label",
+	"default": "default",
+	"options": "options",
+	"description": "description",
+	"in_list_view": "in_list_view",
+	"in_standard_filter": "in_standard_filter",
+	"collapsible": "collapsible",
+	"bold": "bold",
+	"mandatory": "reqd",
+	# DocType properties
+	"allow_copy": "allow_copy",
+	"track_changes": "track_changes",
+	"track_seen": "track_seen",
+	"max_attachments": "max_attachments",
+	"title_field": "title_field",
+	"search_fields": "search_fields",
+	"sort_field": "sort_field",
+}
+
+# Property type inference
+PROPERTY_TYPE_MAP = {
+	"reqd": "Check",
+	"read_only": "Check",
+	"hidden": "Check",
+	"in_list_view": "Check",
+	"in_standard_filter": "Check",
+	"collapsible": "Check",
+	"bold": "Check",
+	"allow_copy": "Check",
+	"track_changes": "Check",
+	"track_seen": "Check",
+	"label": "Data",
+	"default": "Data",
+	"options": "Small Text",
+	"description": "Small Text",
+	"title_field": "Data",
+	"search_fields": "Small Text",
+	"sort_field": "Data",
+	"max_attachments": "Int",
+}
+
+
+def normalize_property_name(prop: str) -> tuple[str, str]:
+	"""
+	Normalize property name to Frappe internal name and infer type.
+	
+	Args:
+		prop: User-friendly property name
+		
+	Returns:
+		Tuple of (normalized_name, property_type)
+	"""
+	prop_lower = prop.lower()
+	
+	# Check direct mapping
+	if prop in PROPERTY_NAME_MAP:
+		normalized = PROPERTY_NAME_MAP[prop]
+		prop_type = PROPERTY_TYPE_MAP.get(normalized, "Data")
+		return normalized, prop_type
+	
+	# Check case-insensitive
+	for key, value in PROPERTY_NAME_MAP.items():
+		if key.lower() == prop_lower:
+			normalized = value
+			prop_type = PROPERTY_TYPE_MAP.get(normalized, "Data")
+			return normalized, prop_type
+	
+	# Return as-is if not found (might be a valid Frappe property)
+	return prop, PROPERTY_TYPE_MAP.get(prop, "Data")
+
+
+def convert_value_to_string(value: Any, property_type: str) -> str:
+	"""
+	Convert value to string format expected by Frappe.
+	
+	Args:
+		value: Property value
+		property_type: Property type
+		
+	Returns:
+		String representation of value
+	"""
+	if property_type == "Check":
+		# Boolean/Check fields: convert to "1" or "0"
+		if isinstance(value, bool):
+			return "1" if value else "0"
+		if isinstance(value, str):
+			return "1" if value.lower() in ("1", "true", "yes", "on") else "0"
+		return "1" if value else "0"
+	elif property_type == "Int":
+		return str(int(value))
+	elif property_type in ("Data", "Small Text", "Text"):
+		return str(value)
+	else:
+		return str(value)
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+@handle_api_error
+def customize_doctype_api(
+	doctype: str,
+	custom_fields: Optional[List[Dict[str, Any]]] = None,
+	field_properties: Optional[Dict[str, Dict[str, Any]]] = None,
+	doctype_properties: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+	"""
+	Simplified endpoint to customize a DocType - add custom fields and modify field properties.
+	
+	This endpoint provides a user-friendly interface for customizing DocTypes, similar to
+	the Customize Form UI but accessible via API. It handles property name normalization,
+	type inference, and bulk operations automatically.
+	
+	**Endpoint**: `/api/method/commander.api.customize_doctype_api`
+	**Method**: POST
+	**Authentication**: Required (System Manager role)
+	
+	**Request Body**:
+	```json
+	{
+		"doctype": "Customer",
+		"custom_fields": [
+			{
+				"field_definition": "custom_industry:Data:*",
+				"insert_after": "customer_name"
+			},
+			{
+				"field_definition": "custom_tax_id:Data",
+				"insert_after": "custom_industry"
+			}
+		],
+		"field_properties": {
+			"customer_name": {
+				"required": true,
+				"bold": true
+			},
+			"email_id": {
+				"readonly": false,
+				"in_list_view": true
+			}
+		},
+		"doctype_properties": {
+			"allow_copy": true,
+			"track_changes": true
+		}
+	}
+	```
+	
+	**Response** (Success):
+	```json
+	{
+		"success": true,
+		"message": "DocType customized successfully",
+		"data": {
+			"doctype": "Customer",
+			"custom_fields_added": 2,
+			"field_properties_modified": 2,
+			"doctype_properties_modified": 2
+		}
+	}
+	```
+	
+	**Field Properties** (simplified names):
+	- `required` / `mandatory` → Sets field as required
+	- `readonly` / `read_only` → Makes field read-only
+	- `hidden` → Hides field
+	- `label` → Changes field label
+	- `default` → Sets default value
+	- `options` → Sets options (for Select/Link fields)
+	- `description` → Sets field description/help text
+	- `in_list_view` → Shows field in list view
+	- `in_standard_filter` → Shows in standard filters
+	- `bold` → Makes label bold
+	- `collapsible` → Makes section collapsible
+	
+	**DocType Properties**:
+	- `allow_copy` → Allow copying documents
+	- `track_changes` → Track document changes
+	- `track_seen` → Track if document was seen
+	- `title_field` → Set title field
+	- `search_fields` → Set search fields (comma-separated)
+	- `sort_field` → Set default sort field
+	- `max_attachments` → Maximum attachments allowed
+	
+	**Error Codes**:
+	- `PERMISSION_DENIED` (403): User lacks System Manager role
+	- `DOCTYPE_NOT_FOUND` (404): DocType does not exist
+	- `CORE_DOCTYPE` (400): Cannot customize core DocTypes
+	- `SINGLE_DOCTYPE` (400): Cannot customize single DocTypes
+	- `CUSTOM_DOCTYPE` (400): Cannot customize custom DocTypes
+	- `FIELD_NOT_FOUND` (404): Field does not exist
+	- `VALIDATION_ERROR` (400): Invalid field definition or properties
+	
+	Args:
+		doctype: Target DocType name (required)
+		custom_fields: List of custom field definitions (optional)
+		field_properties: Dict mapping field names to property changes (optional)
+		doctype_properties: Dict of DocType-level properties (optional)
+		
+	Returns:
+		Success response with customization summary
+		
+	Raises:
+		CommanderAPIError: For API-specific errors
+	"""
+	check_permissions()
+	
+	# Validate doctype
+	if not doctype or not doctype.strip():
+		raise CommanderAPIError(
+			message="doctype is required and cannot be empty",
+			error_code="VALIDATION_ERROR",
+			details={"field": "doctype"},
+		)
+	
+	doctype = doctype.strip()
+	
+	# Check if DocType exists
+	if not frappe.db.exists("DocType", doctype):
+		raise CommanderAPIError(
+			message=f"DocType '{doctype}' not found.",
+			error_code="DOCTYPE_NOT_FOUND",
+			http_status=404,
+			details={"doctype": doctype},
+		)
+	
+	# Get DocType metadata to check restrictions
+	meta = frappe.get_meta(doctype)
+	
+	# Check if core DocType
+	core_doctypes = frappe.model.core_doctypes_list
+	if doctype in core_doctypes:
+		raise CommanderAPIError(
+			message=f"Cannot customize core DocType '{doctype}'.",
+			error_code="CORE_DOCTYPE",
+			details={"doctype": doctype},
+		)
+	
+	# Check if single DocType
+	if meta.issingle:
+		raise CommanderAPIError(
+			message=f"Cannot customize single DocType '{doctype}'.",
+			error_code="SINGLE_DOCTYPE",
+			details={"doctype": doctype},
+		)
+	
+	# Check if custom DocType
+	if meta.custom:
+		raise CommanderAPIError(
+			message=f"Cannot customize custom DocType '{doctype}'. Only standard DocTypes can be customized.",
+			error_code="CUSTOM_DOCTYPE",
+			details={"doctype": doctype},
+		)
+	
+	# Parse custom_fields if provided (handle JSON string)
+	if custom_fields:
+		if isinstance(custom_fields, str):
+			try:
+				import json
+				custom_fields = json.loads(custom_fields)
+			except json.JSONDecodeError:
+				raise CommanderAPIError(
+					message="Invalid JSON format for custom_fields",
+					error_code="VALIDATION_ERROR",
+					details={"field": "custom_fields"},
+				)
+	
+	# Parse field_properties if provided (handle JSON string)
+	if field_properties:
+		if isinstance(field_properties, str):
+			try:
+				import json
+				field_properties = json.loads(field_properties)
+			except json.JSONDecodeError:
+				raise CommanderAPIError(
+					message="Invalid JSON format for field_properties",
+					error_code="VALIDATION_ERROR",
+					details={"field": "field_properties"},
+				)
+	
+	# Parse doctype_properties if provided (handle JSON string)
+	if doctype_properties:
+		if isinstance(doctype_properties, str):
+			try:
+				import json
+				doctype_properties = json.loads(doctype_properties)
+			except json.JSONDecodeError:
+				raise CommanderAPIError(
+					message="Invalid JSON format for doctype_properties",
+					error_code="VALIDATION_ERROR",
+					details={"field": "doctype_properties"},
+				)
+	
+	results = {
+		"doctype": doctype,
+		"custom_fields_added": 0,
+		"field_properties_modified": 0,
+		"doctype_properties_modified": 0,
+		"errors": [],
+	}
+	
+	# Add custom fields
+	if custom_fields:
+		from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+		
+		for field_spec in custom_fields:
+			try:
+				field_def = field_spec.get("field_definition")
+				if not field_def:
+					results["errors"].append("Missing field_definition in custom_fields entry")
+					continue
+				
+				# Parse field definition
+				field_dict = parse_field_definition(field_def)
+				
+				# Set insert_after if provided
+				if "insert_after" in field_spec:
+					field_dict["insert_after"] = field_spec["insert_after"]
+				
+				# Create custom field
+				custom_field = create_custom_field(
+					doctype=doctype,
+					df=field_dict,
+					ignore_validate=False,
+					is_system_generated=True,
+				)
+				
+				if custom_field:
+					results["custom_fields_added"] += 1
+				else:
+					results["errors"].append(f"Failed to create field: {field_dict.get('fieldname')}")
+					
+			except Exception as e:
+				results["errors"].append(f"Error creating custom field: {str(e)}")
+	
+	# Modify field properties
+	if field_properties:
+		from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+		
+		for field_name, properties in field_properties.items():
+			# Validate field exists
+			field = meta.get_field(field_name)
+			if not field:
+				results["errors"].append(f"Field '{field_name}' not found on DocType '{doctype}'")
+				continue
+			
+			# Apply each property
+			for prop_name, prop_value in properties.items():
+				try:
+					normalized_prop, prop_type = normalize_property_name(prop_name)
+					value_str = convert_value_to_string(prop_value, prop_type)
+					
+					make_property_setter(
+						doctype=doctype,
+						fieldname=field_name,
+						property=normalized_prop,
+						value=value_str,
+						property_type=prop_type,
+						for_doctype=False,
+					)
+					
+					results["field_properties_modified"] += 1
+					
+				except Exception as e:
+					results["errors"].append(
+						f"Error setting property '{prop_name}' on field '{field_name}': {str(e)}"
+					)
+	
+	# Modify DocType properties
+	if doctype_properties:
+		from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+		
+		for prop_name, prop_value in doctype_properties.items():
+			try:
+				normalized_prop, prop_type = normalize_property_name(prop_name)
+				value_str = convert_value_to_string(prop_value, prop_type)
+				
+				make_property_setter(
+					doctype=doctype,
+					fieldname=None,
+					property=normalized_prop,
+					value=value_str,
+					property_type=prop_type,
+					for_doctype=True,
+				)
+				
+				results["doctype_properties_modified"] += 1
+				
+			except Exception as e:
+				results["errors"].append(
+					f"Error setting DocType property '{prop_name}': {str(e)}"
+				)
+	
+	# Clear cache to ensure changes are visible
+	frappe.clear_cache(doctype=doctype)
+	
+	# Return results
+	if results["errors"]:
+		# Partial success
+		return {
+			"success": True,
+			"message": "DocType customized with some errors",
+			"data": results,
+			"warnings": results["errors"],
+		}
+	else:
+		return success_response(
+			results,
+			message=f"DocType '{doctype}' customized successfully",
+		)
+
+
+# ============================================================================
 # API Documentation Endpoint
 # ============================================================================
 
@@ -1016,6 +1439,101 @@ def get_api_documentation() -> Dict[str, Any]:
 				],
 			},
 			{
+				"name": "customize_doctype_api",
+				"method": "POST",
+				"path": "/api/method/commander.api.customize_doctype_api",
+				"description": "Simplified endpoint to customize a DocType - add custom fields and modify field properties in one call",
+				"authentication": "Required (System Manager)",
+				"request": {
+					"content_type": "application/json",
+					"body": {
+						"doctype": {
+							"type": "string",
+							"required": True,
+							"description": "Target DocType name",
+							"example": "Customer",
+						},
+						"custom_fields": {
+							"type": "array[object]",
+							"required": False,
+							"description": "List of custom fields to add",
+							"example": [
+								{
+									"field_definition": "custom_industry:Data:*",
+									"insert_after": "customer_name"
+								}
+							],
+						},
+						"field_properties": {
+							"type": "object",
+							"required": False,
+							"description": "Dict mapping field names to property changes (uses simplified property names)",
+							"example": {
+								"customer_name": {
+									"required": True,
+									"bold": True
+								},
+								"email_id": {
+									"readonly": False,
+									"in_list_view": True
+								}
+							},
+						},
+						"doctype_properties": {
+							"type": "object",
+							"required": False,
+							"description": "Dict of DocType-level properties",
+							"example": {
+								"allow_copy": True,
+								"track_changes": True
+							},
+						},
+					},
+				},
+				"response": {
+					"success": {
+						"status": 200,
+						"body": {
+							"success": True,
+							"message": "DocType 'Customer' customized successfully",
+							"data": {
+								"doctype": "Customer",
+								"custom_fields_added": 2,
+								"field_properties_modified": 2,
+								"doctype_properties_modified": 2,
+								"errors": []
+							},
+						},
+					},
+					"error": {
+						"status": 400,
+						"body": {
+							"success": False,
+							"error": {
+								"message": "Cannot customize custom DocType 'Customer'. Only standard DocTypes can be customized.",
+								"code": "CUSTOM_DOCTYPE",
+								"details": {"doctype": "Customer"},
+							},
+						},
+					},
+				},
+				"error_codes": [
+					"PERMISSION_DENIED (403)",
+					"DOCTYPE_NOT_FOUND (404)",
+					"CORE_DOCTYPE (400)",
+					"SINGLE_DOCTYPE (400)",
+					"CUSTOM_DOCTYPE (400)",
+					"FIELD_NOT_FOUND (404)",
+					"VALIDATION_ERROR (400)",
+				],
+				"notes": [
+					"Simplified property names: use 'required' instead of 'reqd', 'readonly' instead of 'read_only'",
+					"Property types are auto-inferred - no need to specify property_type",
+					"Supports bulk operations - modify multiple fields at once",
+					"Can add custom fields and modify properties in a single call",
+				],
+			},
+			{
 				"name": "get_api_documentation",
 				"method": "GET",
 				"path": "/api/method/commander.api.get_api_documentation",
@@ -1214,6 +1732,68 @@ data = {
 
 response = requests.post(url, json=data, headers=headers)
 print(response.json())""",
+			},
+			"customize_doctype": {
+				"curl": """curl -X POST https://your-site.com/api/method/commander.api.customize_doctype_api \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: token YOUR_API_KEY:YOUR_API_SECRET" \\
+  -d '{
+    "doctype": "Customer",
+    "custom_fields": [
+      {
+        "field_definition": "custom_industry:Data:*",
+        "insert_after": "customer_name"
+      }
+    ],
+    "field_properties": {
+      "customer_name": {
+        "required": true,
+        "bold": true
+      },
+      "email_id": {
+        "readonly": false,
+        "in_list_view": true
+      }
+    },
+    "doctype_properties": {
+      "allow_copy": true,
+      "track_changes": true
+    }
+  }'""",
+				"python": """import requests
+
+url = "https://your-site.com/api/method/commander.api.customize_doctype_api"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "token YOUR_API_KEY:YOUR_API_SECRET"
+}
+data = {
+    "doctype": "Customer",
+    "custom_fields": [
+        {
+            "field_definition": "custom_industry:Data:*",
+            "insert_after": "customer_name"
+        }
+    ],
+    "field_properties": {
+        "customer_name": {
+            "required": True,      # Use 'required' instead of 'reqd'
+            "bold": True
+        },
+        "email_id": {
+            "readonly": False,      # Use 'readonly' instead of 'read_only'
+            "in_list_view": True   # No property_type needed!
+        }
+    },
+    "doctype_properties": {
+        "allow_copy": True,
+        "track_changes": True
+    }
+}
+
+response = requests.post(url, json=data, headers=headers)
+print(response.json())""",
+				"note": "This is the recommended endpoint for customizing DocTypes. It uses simplified property names and auto-infers property types.",
 			},
 		},
 		"notes": [

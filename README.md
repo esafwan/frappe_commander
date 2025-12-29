@@ -207,6 +207,8 @@ curl -X POST https://your-site.com/api/method/commander.api.create_doctype_api \
 
 ### Available Endpoints
 
+> **💡 Tip**: For customizing DocTypes, use `customize_doctype_api` (endpoint #4) - it's the easiest way with simplified property names and bulk operations.
+
 #### 1. Create DocType
 
 **Endpoint**: `POST /api/method/commander.api.create_doctype_api`
@@ -288,11 +290,11 @@ Add a custom field to an existing standard DocType.
 }
 ```
 
-#### 3. Add Property Setter
+#### 3. Add Property Setter (Advanced)
 
 **Endpoint**: `POST /api/method/commander.api.add_property_setter_api`
 
-Add a property setter to customize DocType or field properties.
+Low-level endpoint to add a property setter. For most use cases, use `customize_doctype_api` instead.
 
 **Request** (DocType property):
 ```json
@@ -316,23 +318,88 @@ Add a property setter to customize DocType or field properties.
 }
 ```
 
-**Response** (Success):
+#### 4. Customize DocType (Simplified) ⭐ Recommended
+
+**Endpoint**: `POST /api/method/commander.api.customize_doctype_api`
+
+Simplified endpoint to customize a DocType - add custom fields and modify field properties in one call. Uses intuitive property names and auto-infers property types.
+
+**Request**:
 ```json
 {
-  "success": true,
-  "message": "Property setter for 'allow_copy' created successfully",
-  "data": {
-    "doctype": "Sales Invoice",
-    "field_name": null,
-    "property": "allow_copy",
-    "value": "1",
-    "property_type": "Check",
-    "doctype_or_field": "DocType"
+  "doctype": "Customer",
+  "custom_fields": [
+    {
+      "field_definition": "custom_industry:Data:*",
+      "insert_after": "customer_name"
+    },
+    {
+      "field_definition": "custom_tax_id:Data",
+      "insert_after": "custom_industry"
+    }
+  ],
+  "field_properties": {
+    "customer_name": {
+      "required": true,
+      "bold": true
+    },
+    "email_id": {
+      "readonly": false,
+      "in_list_view": true
+    }
+  },
+  "doctype_properties": {
+    "allow_copy": true,
+    "track_changes": true
   }
 }
 ```
 
-#### 4. Get API Documentation
+**Response** (Success):
+```json
+{
+  "success": true,
+  "message": "DocType 'Customer' customized successfully",
+  "data": {
+    "doctype": "Customer",
+    "custom_fields_added": 2,
+    "field_properties_modified": 2,
+    "doctype_properties_modified": 2,
+    "errors": []
+  }
+}
+```
+
+**Simplified Property Names**:
+- `required` / `mandatory` → Sets field as required
+- `readonly` / `read_only` → Makes field read-only
+- `hidden` → Hides field
+- `label` → Changes field label
+- `default` → Sets default value
+- `options` → Sets options (for Select/Link fields)
+- `description` → Sets field description
+- `in_list_view` → Shows field in list view
+- `in_standard_filter` → Shows in standard filters
+- `bold` → Makes label bold
+- `collapsible` → Makes section collapsible
+
+**DocType Properties**:
+- `allow_copy` → Allow copying documents
+- `track_changes` → Track document changes
+- `track_seen` → Track if document was seen
+- `title_field` → Set title field
+- `search_fields` → Set search fields (comma-separated)
+- `sort_field` → Set default sort field
+- `max_attachments` → Maximum attachments allowed
+
+**Benefits**:
+- ✅ No need to know Frappe internal property names (`reqd` vs `required`)
+- ✅ Property types auto-inferred (no need to specify `property_type`)
+- ✅ Bulk operations - modify multiple fields at once
+- ✅ Single call to add fields and modify properties
+- ✅ Intuitive property names
+
+#### 5. Get API Documentation
 
 **Endpoint**: `GET /api/method/commander.api.get_api_documentation`
 
@@ -434,6 +501,48 @@ fetch('https://your-site.com/api/method/commander.api.create_doctype_api', {
 - **Core DocTypes** (DocType, User, Role, etc.) cannot be customized
 - **Single DocTypes** cannot have custom fields
 - All operations require **System Manager** role
+
+### Simplified Customization Example
+
+The `customize_doctype_api` endpoint makes it easy to customize DocTypes without deep Frappe knowledge:
+
+```python
+import requests
+
+url = "https://your-site.com/api/method/commander.api.customize_doctype_api"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "token YOUR_API_KEY:YOUR_API_SECRET"
+}
+
+# Add custom fields and modify existing field properties in one call
+data = {
+    "doctype": "Customer",
+    "custom_fields": [
+        {
+            "field_definition": "custom_industry:Data:*",
+            "insert_after": "customer_name"
+        }
+    ],
+    "field_properties": {
+        "customer_name": {
+            "required": True,      # Use 'required' instead of 'reqd'
+            "bold": True          # Use 'bold' instead of checking property types
+        },
+        "email_id": {
+            "readonly": False,    # Use 'readonly' instead of 'read_only'
+            "in_list_view": True  # Simple boolean, no property_type needed
+        }
+    },
+    "doctype_properties": {
+        "allow_copy": True,       # Simple boolean
+        "track_changes": True
+    }
+}
+
+response = requests.post(url, json=data, headers=headers)
+print(response.json())
+```
 
 ### Complete Documentation
 
