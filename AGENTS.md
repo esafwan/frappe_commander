@@ -94,8 +94,8 @@ def new_doctype_cmd(context, doctype_name, fields, module, no_interact):
 
 **Bench Integration:**
 ```python
-# Line 163
-commands = [new_doctype_cmd]
+# Line 329
+commands = [new_doctype_cmd, customize_doctype_cmd, set_property_cmd]
 ```
 
 This list is automatically discovered by Frappe's command loader, making `bench new-doctype` available system-wide.
@@ -230,14 +230,88 @@ else:
 
 ---
 
+#### 4. **Custom Field Creator** (`commands.py`)
+
+**Location:** `commander/commands.py:168-210`
+
+**Purpose:** Add custom fields to existing DocTypes using Frappe's Custom Field API.
+
+**Implementation:**
+
+```python
+def add_custom_field_to_doctype(doctype_name, field_dict, insert_after=None):
+    # Ensure custom_ prefix
+    if fieldname and not fieldname.startswith("custom_"):
+        field_dict["fieldname"] = f"custom_{fieldname}"
+    
+    # Use Frappe's create_custom_field or fallback
+    if create_custom_field:
+        create_custom_field(doctype_name, field_dict)
+    else:
+        custom_field = frappe.new_doc("Custom Field")
+        custom_field.update({"dt": doctype_name, **field_dict})
+        custom_field.insert()
+    
+    # Update database schema
+    frappe.db.updatedb(doctype_name)
+```
+
+**Key Features:**
+- Auto-prefixes fieldnames with `custom_` if not present
+- Supports sequential field insertion
+- Updates database schema automatically
+- Falls back to direct Custom Field creation for older Frappe versions
+
+**Reference:** `commander/commands.py:168-210`
+
+#### 5. **Property Setter Creator** (`commands.py`)
+
+**Location:** `commander/commands.py:213-236`
+
+**Purpose:** Create Property Setters to modify DocType or field properties.
+
+**Implementation:**
+
+```python
+def infer_property_type(property_name, value):
+    """Auto-detect property type from property name and value."""
+    boolean_properties = {'reqd', 'hidden', 'read_only', 'allow_copy', ...}
+    if property_name.lower() in boolean_properties:
+        return 'Check'
+    # ... more inference logic
+
+def set_property_on_doctype(doctype_name, property_name, value, property_type=None, field_name=None):
+    if property_type is None:
+        property_type = infer_property_type(property_name, value)
+    
+    frappe.make_property_setter(
+        doctype=doctype_name,
+        fieldname=field_name,
+        property=property_name,
+        value=value,
+        property_type=property_type,
+        for_doctype=(field_name is None)
+    )
+```
+
+**Key Features:**
+- Auto-detects property type for common properties (reqd, hidden, etc.)
+- Supports both DocType-level and field-level properties
+- Uses Frappe's `make_property_setter` API
+- Handles boolean properties intelligently
+
+**Reference:** `commander/commands.py:213-236`
+
+---
+
 ## Frappe Integration Points
 
 ### 1. **Command Discovery**
 
-**File:** `commands.py:163`
+**File:** `commands.py:329`
 
 ```python
-commands = [new_doctype_cmd]
+commands = [new_doctype_cmd, customize_doctype_cmd, set_property_cmd]
 ```
 
 **How Frappe finds it:**
@@ -357,6 +431,30 @@ bench --site mysite new-doctype "Task" \
 - Validates field types against allowed list
 - Validates attribute combinations
 - Checks module/app existence
+
+**6. Customize Existing DocTypes**
+- Add custom fields to existing DocTypes (standard or custom)
+- Modify field properties using Property Setters
+- Modify DocType-level properties
+- Auto-detects property types for common operations
+- Sequential field insertion support
+
+```bash
+# Add custom fields
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "priority:Select:options=Low,Medium,High" \
+  -f "notes:Text" \
+  --insert-after "customer"
+
+# Modify properties (simple - auto-detects type)
+bench --site mysite set-property "Sales Invoice" \
+  --property "reqd" --value "1" \
+  --field "customer"
+
+# Modify DocType property
+bench --site mysite set-property "Sales Invoice" \
+  --property "allow_copy" --value "1"
+```
 
 ---
 
@@ -651,6 +749,78 @@ bench --site pm.localhost new-doctype "Task" \
   -f "status:Select:*:options=Open,In Progress,Done" \
   -f "due_date:Date" \
   -m "Projects"
+```
+
+### DocType Customization Examples
+
+#### Simple Customization
+
+```bash
+# Add custom fields to existing DocType
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "priority:Select:options=Low,Medium,High" \
+  -f "internal_notes:Text"
+
+# Make a field required (property-type auto-detected)
+bench --site mysite set-property "Sales Invoice" \
+  --property "reqd" --value "1" \
+  --field "customer"
+
+# Hide a field
+bench --site mysite set-property "Sales Invoice" \
+  --property "hidden" --value "1" \
+  --field "remarks"
+
+# Enable copy on DocType
+bench --site mysite set-property "Sales Invoice" \
+  --property "allow_copy" --value "1"
+```
+
+#### Detailed Customization
+
+```bash
+# Add complex custom fields with insertion point
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "custom_priority:Select:*:options=Low,Medium,High,Urgent:?=Medium" \
+  -f "custom_notes:Text" \
+  -f "custom_discount:Percent:?=0" \
+  -f "custom_is_urgent:Check:?=0" \
+  --insert-after "customer"
+
+# Set properties with explicit types
+bench --site mysite set-property "Sales Invoice" \
+  --property "label" --value "Customer Name" \
+  --property-type "Data" \
+  --field "customer"
+
+# Set DocType-level property
+bench --site mysite set-property "Sales Invoice" \
+  --property "title_field" --value "customer" \
+  --property-type "Data"
+```
+
+#### Complete Workflow
+
+```bash
+# 1. Create base DocType
+bench --site mysite new-doctype "Invoice" \
+  -f "customer:Link:options=Customer" \
+  -f "amount:Currency" \
+  -m "Custom"
+
+# 2. Add custom fields
+bench --site mysite customize-doctype "Invoice" \
+  -f "priority:Select:options=Low,Medium,High" \
+  -f "notes:Text" \
+  --insert-after "customer"
+
+# 3. Modify properties
+bench --site mysite set-property "Invoice" \
+  --property "reqd" --value "1" \
+  --field "customer"
+
+bench --site mysite set-property "Invoice" \
+  --property "allow_copy" --value "1"
 ```
 
 ---
