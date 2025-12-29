@@ -816,6 +816,9 @@ def add_custom_field_cmd(context, doctype_name, field, insert_after):
     bench --site mysite add-custom-field "Customer" \\
       -f "segment:Select:options=Enterprise,SMB,Startup:bold:translatable:inlist" \\
       --insert-after "customer_name"
+    """
+
+
 def validate_customization_allowed(doctype_name):
     """
     Validate that a DocType can be customized according to Frappe restrictions.
@@ -1082,28 +1085,7 @@ def customize_doctype_cmd(context, doctype_name, fields, insert_after):
 
 
 # Register commands for bench to discover
-commands = [new_doctype_cmd, add_custom_field_cmd]
-        if not fields:
-            raise click.UsageError("No fields provided. Use -f to specify custom fields.")
-        
-        parsed_fields = parse_fields(fields)
-        
-        # Track the last inserted field for sequential insertion
-        last_inserted = insert_after
-        
-        for field_dict in parsed_fields:
-            try:
-                # Use last_inserted if insert_after was specified, otherwise None
-                current_insert_after = last_inserted if insert_after else None
-                fieldname = add_custom_field_to_doctype(doctype_name, field_dict, current_insert_after)
-                click.echo(f"Added custom field '{fieldname}' to '{doctype_name}'.")
-                # Update last_inserted for next iteration (sequential insertion)
-                last_inserted = fieldname
-            except Exception as e:
-                click.echo(f"Error adding field '{field_dict.get('fieldname', 'unknown')}': {e}", err=True)
-                raise
-        
-        click.echo(f"Customized DocType '{doctype_name}' with {len(parsed_fields)} field(s).")
+
 
 
 @click.command("set-property")
