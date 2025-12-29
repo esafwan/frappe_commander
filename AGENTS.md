@@ -45,9 +45,9 @@ bench --site mysite new-doctype "Product"
 # Will prompt for fields and module if not provided
 
 # Show comprehensive help
-bench help
-bench help --field-types
-bench help --examples
+bench commander-help
+bench commander-help --field-types
+bench commander-help --examples
 ```
 
 ### Field Definition Syntax
@@ -471,13 +471,13 @@ Commander provides a comprehensive `help` command with detailed documentation an
 
 ```bash
 # Show full help
-bench help
+bench commander-help
 
 # Show field types only
-bench help --field-types
+bench commander-help --field-types
 
 # Show examples only
-bench help --examples
+bench commander-help --examples
 ```
 
 **Help Command Features:**
@@ -534,7 +534,7 @@ Each command also has built-in help via Click:
 
 ```bash
 bench new-doctype --help
-bench help --help
+bench commander-help --help
 ```
 
 ---

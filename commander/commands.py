@@ -290,6 +290,7 @@ def show_help_command():
     click.echo("""
   • Full documentation: See AGENTS.md
   • Command help: bench new-doctype --help
+  • Comprehensive help: bench commander-help
   • During interactive mode: Type 'help' for field syntax help
 """)
     
@@ -426,17 +427,17 @@ def new_doctype_cmd(context, doctype_name, fields, module, no_interact):
             raise click.Abort()
 
 
-@click.command("help")
+@click.command("commander-help")
 @click.option("--field-types", is_flag=True, help="Show detailed field type information")
 @click.option("--examples", is_flag=True, help="Show usage examples")
-def help_cmd(field_types, examples):
+def commander_help_cmd(field_types, examples):
     """
     Show comprehensive help for Commander.
 
     Examples:
-      bench help                    # Show full help
-      bench help --field-types      # Show field types only
-      bench help --examples         # Show examples only
+      bench commander-help                    # Show full help
+      bench commander-help --field-types      # Show field types only
+      bench commander-help --examples         # Show examples only
     """
     if field_types:
         click.echo("\n🔧 FIELD TYPES")
@@ -500,4 +501,4 @@ Project Management:
 
 
 # Register commands for bench to discover
-commands = [new_doctype_cmd, help_cmd]
+commands = [new_doctype_cmd, commander_help_cmd]

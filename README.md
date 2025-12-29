@@ -37,9 +37,9 @@ bench --site mysite new-doctype "Product"
 # Will guide you through adding fields and selecting module
 
 # Show comprehensive help
-bench help
-bench help --field-types
-bench help --examples
+bench commander-help
+bench commander-help --field-types
+bench commander-help --examples
 ```
 
 ### Field Definition Syntax
@@ -166,9 +166,9 @@ See [AGENTS.md](AGENTS.md) - Complete technical documentation for developers and
 bench new-doctype --help
 
 # Show comprehensive help
-bench help
-bench help --field-types
-bench help --examples
+bench commander-help
+bench commander-help --field-types
+bench commander-help --examples
 
 # Create with fields (non-interactive)
 bench --site mysite new-doctype "DocType Name" \
