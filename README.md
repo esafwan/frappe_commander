@@ -60,6 +60,125 @@ Data, Text, Int, Float, Date, Datetime, Select, Link, Table, Check, Currency, Pe
 | Options | `options=<val>` | Sets options for Select/Link/Table |
 | Default | `?=<val>` | Sets default value |
 
+## Customizing Existing DocTypes
+
+Commander supports customizing existing DocTypes (both standard and custom) by adding custom fields and modifying properties.
+
+### Adding Custom Fields
+
+Use `customize-doctype` to add custom fields to existing DocTypes.
+
+**Simple Examples:**
+```bash
+# Add a single custom field
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "notes:Text"
+
+# Add multiple fields (inserted sequentially)
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "priority:Select:options=Low,Medium,High" \
+  -f "internal_notes:Text"
+
+# Add fields after a specific field
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "custom_reference:Data" \
+  -f "custom_contact:Link:options=Contact" \
+  --insert-after "customer"
+```
+
+**Detailed Example:**
+```bash
+# Add complex custom fields with all attributes
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "custom_priority:Select:*:options=Low,Medium,High,Urgent:?=Medium" \
+  -f "custom_notes:Text" \
+  -f "custom_discount:Percent:?=0" \
+  -f "custom_is_urgent:Check:?=0" \
+  --insert-after "customer"
+```
+
+### Modifying Properties
+
+Use `set-property` to modify DocType or field properties using Property Setters.
+
+**Simple Examples:**
+```bash
+# Make a field required (property-type auto-detected)
+bench --site mysite set-property "Sales Invoice" \
+  --property "reqd" --value "1" \
+  --field "customer"
+
+# Hide a field
+bench --site mysite set-property "Sales Invoice" \
+  --property "hidden" --value "1" \
+  --field "remarks"
+
+# Enable copy on DocType
+bench --site mysite set-property "Sales Invoice" \
+  --property "allow_copy" --value "1"
+
+# Make field read-only
+bench --site mysite set-property "Sales Invoice" \
+  --property "read_only" --value "1" \
+  --field "grand_total"
+```
+
+**Detailed Examples:**
+```bash
+# Explicit property type specification
+bench --site mysite set-property "Sales Invoice" \
+  --property "label" --value "Customer Name" \
+  --property-type "Data" \
+  --field "customer"
+
+# Set DocType-level property with explicit type
+bench --site mysite set-property "Sales Invoice" \
+  --property "title_field" --value "customer" \
+  --property-type "Data"
+
+# Set numeric property
+bench --site mysite set-property "Sales Invoice" \
+  --property "width" --value "200" \
+  --property-type "Int" \
+  --field "customer"
+```
+
+**Common Properties:**
+
+| Property | Type | Description | Example |
+|----------|------|-------------|---------|
+| `reqd` | Check | Make field required | `--value "1"` |
+| `hidden` | Check | Hide field | `--value "1"` |
+| `read_only` | Check | Make field read-only | `--value "1"` |
+| `allow_copy` | Check | Allow copying DocType | `--value "1"` |
+| `in_list_view` | Check | Show in list view | `--value "1"` |
+| `label` | Data | Change field label | `--value "New Label"` |
+| `default` | Data | Set default value | `--value "Default"` |
+
+### Complete Customization Workflow
+
+```bash
+# 1. Create a DocType
+bench --site mysite new-doctype "Invoice" \
+  -f "customer:Link:options=Customer" \
+  -f "amount:Currency" \
+  -m "Custom"
+
+# 2. Add custom fields
+bench --site mysite customize-doctype "Invoice" \
+  -f "priority:Select:options=Low,Medium,High" \
+  -f "notes:Text" \
+  --insert-after "customer"
+
+# 3. Modify properties
+bench --site mysite set-property "Invoice" \
+  --property "reqd" --value "1" \
+  --field "customer"
+
+bench --site mysite set-property "Invoice" \
+  --property "allow_copy" --value "1"
+```
+
 ## Examples
 
 ### E-commerce
@@ -122,12 +241,14 @@ bench --site mysite new-doctype "Task" \
 
 ## Features
 
-- Rapid DocType scaffolding from command line
-- Human-readable field definition syntax
-- Automatic module management
-- Built-in validation and error checking
-- Seamless integration with bench CLI
-- Perfect for prototyping and scripting
+- **Rapid DocType scaffolding** - Create DocTypes from command line
+- **Customize existing DocTypes** - Add custom fields and modify properties
+- **Human-readable syntax** - Simple, declarative field definitions
+- **Smart defaults** - Auto-detects property types for common operations
+- **Automatic module management** - Handles module creation and validation
+- **Built-in validation** - Error checking and helpful messages
+- **Seamless integration** - Works with standard bench CLI
+- **Perfect for prototyping** - Rapid iteration and scripting
 
 ## Use Cases
 
@@ -149,6 +270,10 @@ See [AGENTS.md](AGENTS.md) - Complete technical documentation for developers and
 
 ## Command Reference
 
+### new-doctype
+
+Create a new DocType with specified fields.
+
 ```bash
 # Show help
 bench new-doctype --help
@@ -161,6 +286,49 @@ bench --site mysite new-doctype "DocType Name" \
 
 # Create without fields (add later in Desk)
 bench --site mysite new-doctype "Simple DocType"
+```
+
+### customize-doctype
+
+Add custom fields to an existing DocType.
+
+```bash
+# Show help
+bench customize-doctype --help
+
+# Simple: Add fields
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "notes:Text" \
+  -f "priority:Select:options=Low,Medium,High"
+
+# With insertion point
+bench --site mysite customize-doctype "Sales Invoice" \
+  -f "custom_field:Data" \
+  --insert-after "customer"
+```
+
+### set-property
+
+Set properties on DocType or fields using Property Setters.
+
+```bash
+# Show help
+bench set-property --help
+
+# Simple: Make field required (auto-detects property-type)
+bench --site mysite set-property "Sales Invoice" \
+  --property "reqd" --value "1" \
+  --field "customer"
+
+# Simple: DocType-level property
+bench --site mysite set-property "Sales Invoice" \
+  --property "allow_copy" --value "1"
+
+# Detailed: Explicit property type
+bench --site mysite set-property "Sales Invoice" \
+  --property "label" --value "Customer Name" \
+  --property-type "Data" \
+  --field "customer"
 ```
 
 ## Limitations
