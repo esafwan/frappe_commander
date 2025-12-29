@@ -1,137 +1,315 @@
-# DocType Customization in Frappe - Comprehensive Documentation
-
-## Table of Contents
-1. [Overview](#overview)
-2. [Core Concepts](#core-concepts)
-3. [Customization Mechanisms](#customization-mechanisms)
-4. [How Customizations Work](#how-customizations-work)
-5. [Creating Customizations](#creating-customizations)
-6. [Storage and Application](#storage-and-application)
-7. [Export and Sync](#export-and-sync)
-8. [Implementation Details](#implementation-details)
-
----
+# Custom Field Documentation
 
 ## Overview
 
-DocType customization in Frappe allows you to modify standard DocTypes without directly editing their JSON files. This is achieved through two primary mechanisms:
+Custom Fields in Frappe allow users to extend standard DocTypes with additional fields without modifying the core DocType definition. Custom fields are stored separately from the DocType JSON and are dynamically merged into the DocType metadata when loaded. This enables customization of standard DocTypes while maintaining upgradability.
 
-1. **Property Setters** - Override properties of existing fields and DocType-level settings
-2. **Custom Fields** - Add new fields to existing DocTypes
-
-The customization system ensures that:
-- Standard DocType JSON files remain untouched
-- Customizations persist across updates
-- Customizations can be exported and synced via fixtures
-- Customizations are applied dynamically when metadata is loaded
+**Key Concept**: Custom fields are not part of the DocType JSON file but are stored in the `tabCustom Field` database table and automatically merged into DocType metadata during runtime.
 
 ---
 
-## Core Concepts
+## Table of Contents
 
-### 1. Customize Form (UI Layer)
-
-**File**: `frappe/custom/doctype/customize_form/customize_form.py`
-
-The `CustomizeForm` DocType provides a user-friendly interface for customizing DocTypes. It acts as a wrapper around Property Setters and Custom Fields.
-
-**Key Methods**:
-- `fetch_to_customize()` (lines 97-115): Loads existing DocType metadata into the customize form
-- `save_customization()` (lines 224-262): Saves customizations by creating/updating Property Setters and Custom Fields
-- `set_property_setters()` (lines 264-279): Creates Property Setter records for changed properties
-- `update_custom_fields()` (lines 457-468): Creates or updates Custom Field records
-
-**Reference**: `frappe/custom/doctype/customize_form/customize_form.py:29-835`
-
-### 2. Property Setter
-
-**File**: `frappe/custom/doctype/property_setter/property_setter.py`
-
-Property Setters override standard properties of DocTypes, DocFields, DocType Links, DocType Actions, and DocType States without modifying the original JSON.
-
-**Key Fields**:
-- `doc_type`: The DocType being customized
-- `doctype_or_field`: What is being customized (`DocType`, `DocField`, `DocType Link`, `DocType Action`, `DocType State`)
-- `field_name`: Field name (for DocField)
-- `row_name`: Row name (for DocType Link/Action/State)
-- `property`: Property name to override
-- `property_type`: Data type of the property
-- `value`: New value for the property
-
-**Key Functions**:
-- `make_property_setter()` (lines 73-99): Creates a new Property Setter record
-- `delete_property_setter()` (lines 102-115): Deletes Property Setter records
-
-**Reference**: `frappe/custom/doctype/property_setter/property_setter.py:11-115`
-
-### 3. Custom Field
-
-**File**: `frappe/custom/doctype/custom_field/custom_field.py`
-
-Custom Fields add new fields to existing DocTypes. They are stored separately and merged with standard fields when metadata is loaded.
-
-**Key Fields**:
-- `dt`: DocType name
-- `fieldname`: Field name (auto-prefixed with `custom_` if not provided)
-- `fieldtype`: Type of field
-- `insert_after`: Position where field should be inserted
-- `is_system_generated`: Flag for system-generated fields
-
-**Key Functions**:
-- `create_custom_field()` (lines 293-311): Creates a single Custom Field
-- `create_custom_fields()` (lines 314-380): Creates/updates multiple Custom Fields
-
-**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:16-443`
+1. [Architecture & Storage](#architecture--storage)
+2. [Custom Field Document Structure](#custom-field-document-structure)
+3. [Lifecycle & Workflow](#lifecycle--workflow)
+4. [Creation Methods](#creation-methods)
+5. [Metadata Loading & Merging](#metadata-loading--merging)
+6. [Database Schema Synchronization](#database-schema-synchronization)
+7. [Field Ordering & Positioning](#field-ordering--positioning)
+8. [Custom Apps Integration](#custom-apps-integration)
+9. [API Reference](#api-reference)
+10. [Restrictions & Limitations](#restrictions--limitations)
+11. [Developer Mode Behavior](#developer-mode-behavior)
+12. [Best Practices](#best-practices)
 
 ---
 
-## Customization Mechanisms
+## Architecture & Storage
 
-### Mechanism 1: Property Setters
+### Storage Location
 
-Property Setters modify existing properties without changing the source JSON. They can override:
+Custom fields are stored in the `tabCustom Field` database table, which is a standard Frappe DocType. Each custom field record represents a field that extends a target DocType.
 
-1. **DocType Properties**: Properties at the DocType level
-   - Examples: `search_fields`, `title_field`, `sort_field`, `allow_copy`, `track_changes`, etc.
-   - **Reference**: `frappe/custom/doctype/customize_form/customize_form.py:718-750` (doctype_properties dictionary)
+**File**: `frappe/custom/doctype/custom_field/custom_field.json`  
+**Database Table**: `tabCustom Field`
 
-2. **DocField Properties**: Properties of existing fields
-   - Examples: `label`, `fieldtype`, `options`, `reqd`, `hidden`, `read_only`, `in_list_view`, etc.
-   - **Reference**: `frappe/custom/doctype/customize_form/customize_form.py:752-802` (docfield_properties dictionary)
+### Key Fields in Custom Field DocType
 
-3. **DocType Link/Action/State Properties**: Properties of links, actions, and states
-   - **Reference**: `frappe/custom/doctype/customize_form/customize_form.py:804-819`
+The Custom Field DocType contains all standard DocField properties plus:
 
-### Mechanism 2: Custom Fields
+- `dt` (Link to DocType): The target DocType this field extends
+- `fieldname`: The name of the field (auto-generated with `custom_` prefix)
+- `insert_after`: Controls field positioning
+- `is_system_generated`: Flag indicating if created programmatically
+- `is_virtual`: Flag for virtual fields (no DB column)
 
-Custom Fields add entirely new fields to DocTypes. They:
-- Are stored in the `Custom Field` DocType
-- Are automatically prefixed with `custom_` if fieldname is not provided
-- Can be positioned using `insert_after`
-- Are merged with standard fields when metadata is loaded
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.json` (lines 1-509)
 
 ---
 
-## How Customizations Work
+## Custom Field Document Structure
 
-### Metadata Loading Process
+### Core Class
 
-When a DocType's metadata is loaded, customizations are applied in the following order:
+**File**: `frappe/custom/doctype/custom_field/custom_field.py`  
+**Class**: `CustomField(Document)` (line 16)
 
-**File**: `frappe/model/meta.py`
+### Key Methods
 
-1. **Load Standard DocType** (line 152-159): Loads the DocType from database or JSON file
-2. **Process Metadata** (line 161-175): Applies customizations
-   - `add_custom_fields()` (line 168, implementation at lines 399-415)
-   - `apply_property_setters()` (line 169, implementation at lines 417-462)
-   - `add_custom_links_and_actions()` (line 174, implementation at lines 464-489)
+#### 1. `autoname()` (lines 122-124)
+```python
+def autoname(self):
+    self.set_fieldname()
+    self.name = self.dt + "-" + self.fieldname
+```
+- Automatically generates the document name as `{doctype}-{fieldname}`
+- Ensures fieldname is set before naming
 
-### Step-by-Step Application
+#### 2. `set_fieldname()` (lines 126-157)
+```python
+def set_fieldname(self):
+    restricted = ("name", "parent", "creation", "modified", ...)
+    if not self.fieldname:
+        # Generate from label
+        self.fieldname = "custom_" + scrubbed_label
+    self.fieldname = self.fieldname.lower()
+```
+- Generates fieldname from label if not provided
+- Prefixes with `custom_` to avoid conflicts
+- Converts to lowercase
+- Handles restricted fieldnames
 
-#### 1. Adding Custom Fields
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:126-157`
 
-**Method**: `Meta.add_custom_fields()`  
-**File**: `frappe/model/meta.py:399-415`
+#### 3. `validate()` (lines 162-202)
+- Checks for fieldname conflicts with existing fields
+- Validates `insert_after` positioning
+- Prevents fieldtype changes for non-virtual fields (unless allowed)
+- Validates translatable field support
+
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:162-202`
+
+#### 4. `on_update()` (lines 204-214)
+```python
+def on_update(self):
+    if not self.flags.ignore_validate:
+        validate_fields_for_doctype(self.dt)
+    if not frappe.flags.in_create_custom_fields:
+        frappe.clear_cache(doctype=self.dt)
+        frappe.db.updatedb(self.dt)
+```
+- Validates all fields for the doctype
+- Clears metadata cache
+- Updates database schema (adds/modifies column)
+
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:204-214`
+
+#### 5. `on_trash()` (lines 216-239)
+- Prevents deletion of Administrator-owned fields by non-admins
+- Deletes associated property setters
+- Updates doctype layouts
+- Clears metadata cache
+
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:216-239`
+
+---
+
+## Lifecycle & Workflow
+
+### Creation Flow
+
+1. **User/Code Creates Custom Field Document**
+   - Sets `dt` (target DocType), `label`, `fieldtype`, etc.
+   - `before_insert()` hook sets fieldname (line 159-160)
+   - `autoname()` generates document name (line 122-124)
+
+2. **Validation**
+   - `validate()` checks conflicts, positioning, fieldtype changes (line 162-202)
+   - Fieldname uniqueness checked against existing fields
+
+3. **Insertion**
+   - Document saved to `tabCustom Field` table
+   - `on_update()` hook triggered (line 204-214)
+
+4. **Schema Update**
+   - `frappe.db.updatedb(self.dt)` called (line 214)
+   - Database column created/modified if not virtual
+
+5. **Cache Invalidation**
+   - Metadata cache cleared for target DocType (line 213)
+   - Next metadata load will include the new field
+
+### Update Flow
+
+1. Field properties modified
+2. `validate()` ensures fieldtype changes are allowed
+3. `on_update()` syncs schema changes
+4. Cache cleared, metadata reloaded
+
+### Deletion Flow
+
+1. `on_trash()` validates permissions (line 216-239)
+2. Property setters deleted (line 226)
+3. DocType layouts updated (lines 228-237)
+4. Cache cleared
+5. Database column remains (manual cleanup may be needed)
+
+---
+
+## Creation Methods
+
+### 1. Via UI (Customize Form)
+
+Users can create custom fields through the Frappe UI:
+- Navigate to Customize Form
+- Select DocType
+- Add custom field
+- Configure properties
+
+**Frontend**: `frappe/custom/doctype/custom_field/custom_field.js` (lines 1-152)
+
+### 2. Via Python API - Single Field
+
+**Function**: `create_custom_field()`  
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:293-311`
+
+```python
+def create_custom_field(doctype, df, ignore_validate=False, is_system_generated=True):
+    """
+    Create a single custom field
+    
+    Args:
+        doctype: Target DocType name
+        df: Field definition dict
+        ignore_validate: Skip validation
+        is_system_generated: Mark as system generated
+    """
+```
+
+**Example**:
+```python
+from frappe.custom.doctype.custom_field.custom_field import create_custom_field
+
+create_custom_field("Customer", {
+    "fieldname": "custom_industry",
+    "label": "Industry",
+    "fieldtype": "Data",
+    "insert_after": "customer_name"
+})
+```
+
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:293-311`
+
+### 3. Via Python API - Multiple Fields
+
+**Function**: `create_custom_fields()`  
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:314-380`
+
+```python
+def create_custom_fields(custom_fields: dict, ignore_validate=False, update=True):
+    """
+    Add / update multiple custom fields
+    
+    :param custom_fields: example {'Sales Invoice': [dict(fieldname='test')]}
+    """
+```
+
+**Example**:
+```python
+from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+create_custom_fields({
+    "Sales Invoice": [
+        {"fieldname": "custom_po_number", "label": "PO Number", "fieldtype": "Data"},
+        {"fieldname": "custom_delivery_date", "label": "Delivery Date", "fieldtype": "Date"}
+    ],
+    ("Customer", "Supplier"): [
+        {"fieldname": "custom_tax_id", "label": "Tax ID", "fieldtype": "Data"}
+    ]
+})
+```
+
+**Key Features**:
+- Supports multiple doctypes (tuple syntax)
+- Handles updates if field exists
+- Batch processing with `frappe.flags.in_create_custom_fields` (line 328)
+- Updates schema only once per doctype (lines 375-377)
+
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:314-380`
+
+### 4. Via Custom App JSON Files
+
+Custom fields can be defined in JSON files within custom app modules:
+
+**Location**: `{app}/{module}/custom/{doctype}.json`
+
+**Structure**:
+```json
+{
+    "doctype": "Customer",
+    "custom_fields": [
+        {
+            "fieldname": "custom_industry",
+            "label": "Industry",
+            "fieldtype": "Data",
+            "insert_after": "customer_name"
+        }
+    ],
+    "sync_on_migrate": true
+}
+```
+
+**Sync Function**: `sync_customizations()`  
+**Location**: `frappe/modules/utils.py:100-119`
+
+**Sync Logic**: `sync_customizations_for_doctype()`  
+**Location**: `frappe/modules/utils.py:122-194`
+
+**Process**:
+1. Scans `{app}/{module}/custom/` folders (line 110)
+2. Loads JSON files (line 114-115)
+3. Checks `sync_on_migrate` flag (line 116)
+4. Inserts/updates custom fields (lines 141-153)
+5. Updates database schema (line 193)
+
+**Reference**: 
+- `frappe/modules/utils.py:100-119` (sync_customizations)
+- `frappe/modules/utils.py:122-194` (sync_customizations_for_doctype)
+- `frappe/modules/utils.py:141-153` (Custom Field sync logic)
+
+### 5. Via Database Direct Insert
+
+Custom fields can be inserted directly into `tabCustom Field` table, but this is not recommended as it bypasses validation and schema updates.
+
+---
+
+## Metadata Loading & Merging
+
+### Meta Class Processing
+
+When a DocType metadata is loaded, custom fields are automatically merged:
+
+**File**: `frappe/model/meta.py`  
+**Class**: `Meta` (line 125)
+
+**Process Flow** (line 161-175):
+```python
+def process(self):
+    self.add_custom_fields()      # Merge custom fields
+    self.apply_property_setters()  # Apply property setters
+    self.init_field_caches()       # Build field maps
+    self.sort_fields()             # Order fields
+    self.get_valid_columns()       # Validate columns
+    self.set_custom_permissions()  # Apply permissions
+    self.add_custom_links_and_actions()  # Add custom links
+    self.check_if_large_table()    # Performance check
+```
+
+### Adding Custom Fields to Metadata
+
+**Method**: `add_custom_fields()`  
+**Location**: `frappe/model/meta.py:399-415`
 
 ```python
 def add_custom_fields(self):
@@ -144,500 +322,579 @@ def add_custom_fields(self):
         fieldname="*",
         as_dict=True,
         order_by="idx",
-        update={"is_custom_field": 1},
+        update={"is_custom_field": 1},  # Mark as custom field
     )
     
     if not custom_fields:
         return
     
-    self.extend("fields", custom_fields)
+    self.extend("fields", custom_fields)  # Merge into fields list
 ```
 
-**Process**:
-1. Queries all Custom Fields for the DocType
-2. Marks them with `is_custom_field: 1`
-3. Extends the fields list with custom fields
-4. Fields are ordered by `idx` (set via `insert_after`)
+**Key Points**:
+- Fetches all custom fields for the doctype (line 403-410)
+- Marks each field with `is_custom_field: 1` (line 409)
+- Orders by `idx` (line 408)
+- Extends the `fields` list (line 415)
 
 **Reference**: `frappe/model/meta.py:399-415`
 
-#### 2. Applying Property Setters
+### Field Identification
 
-**Method**: `Meta.apply_property_setters()`  
-**File**: `frappe/model/meta.py:417-462`
+Custom fields are identified by the `is_custom_field` attribute:
 
-```python
-def apply_property_setters(self):
-    property_setters = frappe.db.get_values(
-        "Property Setter",
-        filters={"doc_type": self.name},
-        fieldname="*",
-        as_dict=True,
-    )
-    
-    for ps in property_setters:
-        if ps.doctype_or_field == "DocType":
-            self.set(ps.property, cast(ps.property_type, ps.value))
-        elif ps.doctype_or_field == "DocField":
-            for d in self.fields:
-                if d.fieldname == ps.field_name:
-                    d.set(ps.property, cast(ps.property_type, ps.value))
-                    break
-        # ... similar for DocType Link, Action, State
-```
-
-**Process**:
-1. Queries all Property Setters for the DocType
-2. Applies them based on `doctype_or_field`:
-   - `DocType`: Sets properties on the DocType itself
-   - `DocField`: Finds the field and sets its property
-   - `DocType Link/Action/State`: Finds the row and sets its property
-3. Uses type casting based on `property_type`
-
-**Reference**: `frappe/model/meta.py:417-462`
-
-#### 3. Adding Custom Links and Actions
-
-**Method**: `Meta.add_custom_links_and_actions()`  
-**File**: `frappe/model/meta.py:464-489`
+**Method**: `get_custom_fields()`  
+**Location**: `frappe/model/meta.py:363-364`
 
 ```python
-def add_custom_links_and_actions(self):
-    for doctype, fieldname in (
-        ("DocType Link", "links"),
-        ("DocType Action", "actions"),
-        ("DocType State", "states"),
-    ):
-        for d in frappe.get_all(
-            doctype, fields="*", filters=dict(parent=self.name, custom=1), ignore_ddl=True
-        ):
-            self.append(fieldname, d)
-        
-        # Apply ordering if specified
-        order = json.loads(self.get(f"{fieldname}_order") or "[]")
-        if order:
-            # Reorder based on saved order
+def get_custom_fields(self):
+    return [d for d in self.fields if getattr(d, "is_custom_field", False)]
 ```
 
-**Process**:
-1. Queries custom DocType Links, Actions, and States (where `custom=1`)
-2. Appends them to the respective lists
-3. Applies ordering if `{fieldname}_order` property setter exists
-
-**Reference**: `frappe/model/meta.py:464-489`
+**Reference**: `frappe/model/meta.py:363-364`
 
 ---
 
-## Creating Customizations
+## Database Schema Synchronization
 
-### Method 1: Via Customize Form UI
+### Schema Update Trigger
 
-**File**: `frappe/custom/doctype/customize_form/customize_form.js`
+When a custom field is created/updated, the database schema is synchronized:
 
-1. Navigate to Customize Form (`/app/customize-form`)
-2. Select a DocType (line 54-75)
-3. Modify fields and properties
-4. Click "Update" button (line 438-441)
-5. Calls `save_customization()` method
+**Trigger**: `on_update()` hook calls `frappe.db.updatedb(self.dt)`  
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:214`
 
-**Flow**:
-```
-User selects DocType
-  → fetch_to_customize() loads metadata
-  → User modifies properties
-  → save_customization() is called
-    → update_custom_fields() creates/updates Custom Fields
-    → set_property_setters() creates Property Setters
-    → set_name_translation() updates translations
-```
+### Database Update Process
 
-**Reference**: `frappe/custom/doctype/customize_form/customize_form.js:406-422`
-
-### Method 2: Via Database/API
-
-#### Creating Custom Fields Programmatically
-
-**Function**: `create_custom_field()`  
-**File**: `frappe/custom/doctype/custom_field/custom_field.py:293-311`
+**Method**: `updatedb()`  
+**Location**: `frappe/database/mariadb/database.py:450-466`
 
 ```python
-from frappe.custom.doctype.custom_field.custom_field import create_custom_field
-
-create_custom_field(
-    "Sales Invoice",
-    {
-        "fieldname": "custom_notes",
-        "label": "Notes",
-        "fieldtype": "Text",
-        "insert_after": "customer",
-    }
-)
+def updatedb(self, doctype, meta=None):
+    """
+    Syncs a DocType to the table
+    * creates if required
+    * updates columns
+    * updates indices
+    """
+    res = self.sql("select issingle from `tabDocType` where name=%s", (doctype,))
+    if not res[0][0]:  # Not a single doctype
+        db_table = MariaDBTable(doctype, meta)
+        db_table.validate()
+        db_table.sync()  # Sync schema
+        self.commit()
 ```
 
-**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:293-311`
+**Reference**: `frappe/database/mariadb/database.py:450-466`
 
-#### Creating Property Setters Programmatically
+### Schema Sync Implementation
 
-**Function**: `make_property_setter()`  
-**File**: `frappe/custom/doctype/property_setter/property_setter.py:73-99`
+**Class**: `DBTable`  
+**File**: `frappe/database/schema.py`  
+**Method**: `sync()` (line 40)
+
+**Process**:
+1. `get_columns_from_docfields()` - Loads columns from metadata including custom fields (line 76-106)
+2. Compares with existing database columns
+3. Generates ALTER TABLE statements for:
+   - New columns (add_column)
+   - Type changes (change_type)
+   - Nullability changes (change_nullability)
+   - Index additions (add_index)
+   - Unique constraints (add_unique)
+
+**Key Method**: `get_columns_from_docfields()`  
+**Location**: `frappe/database/schema.py:76-106`
 
 ```python
-from frappe.custom.doctype.property_setter.property_setter import make_property_setter
-
-# For DocType property
-make_property_setter(
-    doctype="Sales Invoice",
-    fieldname=None,
-    property="allow_copy",
-    value="1",
-    property_type="Check",
-    for_doctype=True
-)
-
-# For DocField property
-make_property_setter(
-    doctype="Sales Invoice",
-    fieldname="customer",
-    property="reqd",
-    value="1",
-    property_type="Check"
-)
+def get_columns_from_docfields(self):
+    """
+    get columns from docfields and custom fields
+    """
+    fields = self.meta.get_fieldnames_with_value(with_field_meta=True)
+    # ... processes all fields including custom fields
+    for field in fields:
+        if field.get("is_virtual"):
+            continue
+        self.columns[field.get("fieldname")] = DbColumn(...)
 ```
 
-**Reference**: `frappe/custom/doctype/property_setter/property_setter.py:73-99`
+**Reference**: `frappe/database/schema.py:76-106`
 
-**Also available as**: `frappe.make_property_setter()`  
-**Reference**: `frappe/__init__.py:1507`
+### Virtual Fields
 
-### Method 3: Via Custom App Fixtures
+Custom fields with `is_virtual: 1` do not create database columns. They are computed at runtime and only exist in metadata.
 
-Customizations can be exported and included in custom apps as fixtures.
+**Check**: `frappe/database/schema.py:92-93`
 
-#### Export Customizations
+---
 
-**Function**: `export_customizations()`  
-**File**: `frappe/modules/utils.py:55-97`
+## Field Ordering & Positioning
+
+### Insert After Mechanism
+
+Custom fields use the `insert_after` property to control positioning:
+
+**Property**: `insert_after` - Fieldname of the field after which to insert
+
+**Auto-calculation**: If `insert_after == "append"`, it's set to the last field  
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:180-181`
+
+### Field Sorting
+
+**Method**: `sort_fields()`  
+**Location**: `frappe/model/meta.py:518-590`
+
+**Priority Order**:
+1. `field_order` property setter (highest priority)
+2. `insert_after` for custom fields
+3. Default field order
+
+**Custom Field Sorting Logic** (lines 570-585):
+```python
+elif target_position := getattr(field, "insert_after", None):
+    # Handle Section/Column Break positioning
+    if field.fieldtype in ["Section Break", "Column Break"]:
+        # Find next break and adjust position
+    insertion_map.setdefault(target_position, []).append(field.fieldname)
+else:
+    # If custom field is at the top, insert after is None
+    field_order.insert(0, field.fieldname)
+```
+
+**Reference**: `frappe/model/meta.py:518-590`
+
+### Index Calculation
+
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:183-184`
 
 ```python
-from frappe.modules.utils import export_customizations
-
-export_customizations(
-    module="Custom",
-    doctype="Sales Invoice",
-    sync_on_migrate=True,
-    with_permissions=False
-)
+if self.insert_after and self.insert_after in fieldnames:
+    self.idx = fieldnames.index(self.insert_after) + 1
 ```
 
-This creates a JSON file at: `{app}/{module}/custom/{doctype}.json`
+---
 
-**Reference**: `frappe/modules/utils.py:55-97`
+## Custom Apps Integration
 
-#### Fixture File Structure
+### Export Custom Fields
 
-**Location**: `{app}/{module}/custom/{doctype}.json`
+**Function**: `export_doc()`  
+**Location**: `frappe/modules/utils.py:58-99`
 
-**Structure**:
-```json
-{
-    "doctype": "Sales Invoice",
-    "sync_on_migrate": true,
-    "custom_fields": [
-        {
-            "dt": "Sales Invoice",
-            "fieldname": "custom_notes",
-            "label": "Notes",
-            "fieldtype": "Text",
-            "insert_after": "customer",
-            ...
-        }
-    ],
-    "property_setters": [
-        {
-            "doc_type": "Sales Invoice",
-            "doctype_or_field": "DocField",
-            "field_name": "customer",
-            "property": "reqd",
-            "property_type": "Check",
-            "value": "1"
-        }
-    ],
-    "links": [...],
-    "custom_perms": [...]
+Custom fields can be exported to custom app folders:
+
+```python
+custom = {
+    "custom_fields": frappe.get_all(
+        "Custom Field", 
+        fields="*", 
+        filters={"dt": doctype}, 
+        order_by="name"
+    ),
+    # ... other customizations
 }
 ```
 
-**Reference**: `frappe/modules/utils.py:55-97`
+**Reference**: `frappe/modules/utils.py:68`
 
-#### Sync Customizations
+### Import/Sync Custom Fields
 
 **Function**: `sync_customizations()`  
-**File**: `frappe/modules/utils.py:100-119`
-
-Customizations are automatically synced during:
-- `bench migrate` (line 154 in `frappe/migrate.py`)
-- App installation (line 329 in `frappe/installer.py`)
+**Location**: `frappe/modules/utils.py:100-119`
 
 **Process**:
-1. Scans all apps for `{module}/custom/*.json` files
-2. If `sync_on_migrate: true`, syncs the customizations
-3. Calls `sync_customizations_for_doctype()` for each file
-
-**Reference**: `frappe/modules/utils.py:100-194`
-
-**Sync Implementation**: `sync_customizations_for_doctype()`  
-**File**: `frappe/modules/utils.py:122-194`
-
-```python
-def sync_customizations_for_doctype(data: dict, folder: str, filename: str = ""):
-    doctype = data["doctype"]
-    
-    # Sync Custom Fields
-    if data["custom_fields"]:
-        sync("custom_fields", "Custom Field", "dt")
-    
-    # Sync Property Setters
-    if data["property_setters"]:
-        sync("property_setters", "Property Setter", "doc_type")
-    
-    # Sync Custom Permissions
-    if data.get("custom_perms"):
-        sync("custom_perms", "Custom DocPerm", "parent")
-```
-
-**Reference**: `frappe/modules/utils.py:122-194`
-
----
-
-## Storage and Application
-
-### Database Tables
-
-1. **Custom Field Table**: `tabCustom Field`
-   - Stores all custom fields
-   - Key fields: `dt`, `fieldname`, `fieldtype`, `insert_after`, `idx`
-   - **Reference**: `frappe/custom/doctype/custom_field/custom_field.json`
-
-2. **Property Setter Table**: `tabProperty Setter`
-   - Stores all property overrides
-   - Key fields: `doc_type`, `doctype_or_field`, `field_name`, `property`, `value`
-   - **Reference**: `frappe/custom/doctype/property_setter/property_setter.json`
-
-3. **DocType Link/Action/State Tables**: `tabDocType Link`, `tabDocType Action`, `tabDocType State`
-   - Stores custom links, actions, and states
-   - Marked with `custom=1` flag
-   - **Reference**: `frappe/model/meta.py:464-489`
-
-### Metadata Cache
-
-Metadata is cached to improve performance:
-- Cache key: `doctype_meta::{doctype}`
-- Cleared when customizations are updated
-- **Reference**: `frappe/model/meta.py:68-88`
-
-**Cache Clearing**:
-- When Custom Field is saved: `frappe/custom/doctype/custom_field/custom_field.py:213`
-- When Property Setter is saved: `frappe/custom/doctype/property_setter/property_setter.py:44`
-- When Customize Form saves: `frappe/custom/doctype/customize_form/customize_form.py:254`
-
----
-
-## Export and Sync
-
-### Export Process
-
-**UI Export**:
-1. Open Customize Form
-2. Select DocType
-3. Click "Export Customizations" (developer mode only)
-4. Select module and options
-5. File is created at `{module}/custom/{doctype}.json`
-
-**Reference**: `frappe/custom/doctype/customize_form/customize_form.js:239-285`
-
-**Programmatic Export**:
-```python
-from frappe.modules.utils import export_customizations
-
-export_customizations(
-    module="Custom",
-    doctype="Sales Invoice",
-    sync_on_migrate=True,
-    with_permissions=False
-)
-```
-
-**Reference**: `frappe/modules/utils.py:55-97`
-
-### Sync Process
-
-**Automatic Sync** (during migrate):
-1. `bench migrate` calls `sync_customizations()`
-2. Scans all apps for `custom/*.json` files
-3. Syncs files with `sync_on_migrate: true`
-4. Creates/updates Custom Fields and Property Setters in database
-
-**Reference**: `frappe/migrate.py:154`
-
-**Manual Sync**:
-```python
-from frappe.modules.utils import sync_customizations
-
-sync_customizations(app="my_app")
-```
+1. Scans all installed apps (line 106)
+2. Checks `{app}/{module}/custom/` folders (line 110)
+3. Loads JSON files (line 114)
+4. Syncs if `sync_on_migrate: true` or during install (lines 116-119)
 
 **Reference**: `frappe/modules/utils.py:100-119`
 
-### Sync Behavior
+### Sync Logic for Custom Fields
 
-**Custom Fields**:
-- If field doesn't exist: Creates new Custom Field
-- If field exists: Updates existing Custom Field
-- Uses `db_update()` to avoid triggering validation hooks
+**Location**: `frappe/modules/utils.py:141-153`
 
-**Property Setters**:
-- Property Setters implement their own deduplication
-- Uses `insert()` which handles duplicates via autoname
-- Sets `validate_fields_for_doctype=False` flag
+```python
+case "Custom Field":
+    for d in data[key]:
+        field = frappe.db.get_value(
+            "Custom Field", {"dt": doc_type, "fieldname": d["fieldname"]}
+        )
+        if not field:
+            d["owner"] = "Administrator"
+            _insert(d)  # Insert new field
+        else:
+            custom_field = frappe.get_doc("Custom Field", field)
+            custom_field.flags.ignore_validate = True
+            custom_field.update(d)
+            custom_field.db_update()  # Update existing
+```
 
-**Reference**: `frappe/modules/utils.py:129-172`
+**Key Points**:
+- Checks if field exists (line 143-144)
+- Inserts if new (line 147-148)
+- Updates if exists (line 150-153)
+- Sets owner to Administrator (line 147)
+- Skips validation during sync (line 151)
+
+**Reference**: `frappe/modules/utils.py:141-153`
 
 ---
 
-## Implementation Details
+## API Reference
 
-### Field Ordering
+### Core Functions
 
-Field order is maintained via:
-1. `idx` field in Custom Field (set based on `insert_after`)
-2. `field_order` Property Setter (JSON array of fieldnames)
+#### `create_custom_field_if_values_exist(doctype, df)`
 
-**Setting Field Order**:
-- **Method**: `set_property_setter_for_field_order()`  
-- **File**: `frappe/custom/doctype/customize_form/customize_form.py:281-305`
+Creates a custom field only if the column exists in the database and has non-empty values.
+
+**Parameters**:
+- `doctype`: Target DocType name
+- `df`: Field definition dictionary
+
+**Use Case**: Useful for migrations where a column was added directly to the database and needs to be registered as a custom field.
+
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:285-290`
+
+#### `create_custom_field(doctype, df, ignore_validate=False, is_system_generated=True)`
+
+Creates a single custom field.
+
+**Parameters**:
+- `doctype`: Target DocType name
+- `df`: Field definition dictionary
+- `ignore_validate`: Skip validation (default: False)
+- `is_system_generated`: Mark as system generated (default: True)
+
+**Returns**: CustomField document or None if already exists
+
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:293-311`
+
+#### `create_custom_fields(custom_fields: dict, ignore_validate=False, update=True)`
+
+Creates/updates multiple custom fields.
+
+**Parameters**:
+- `custom_fields`: Dict mapping doctype(s) to field lists
+  - Single doctype: `{"Customer": [field_dict]}`
+  - Multiple doctypes: `{("Customer", "Supplier"): [field_dict]}`
+- `ignore_validate`: Skip validation (default: False)
+- `update`: Update existing fields (default: True)
+
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:314-380`
+
+#### `get_fields_label(doctype=None)`
+
+Returns list of field labels for a doctype (for UI dropdown).
+
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:269-282`
+
+#### `rename_fieldname(custom_field: str, fieldname: str)`
+
+Renames a custom field's fieldname.
+
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:396-425`
+
+**Process**:
+1. Validates system-generated fields cannot be renamed (line 407-408)
+2. Checks column doesn't exist (line 409-410)
+3. Renames database column if exists (line 415-416)
+4. Updates fieldname in Custom Field document (line 420)
+5. Updates references (line 421)
+
+**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:396-425`
+
+### Metadata Methods
+
+#### `Meta.add_custom_fields()`
+
+Merges custom fields into DocType metadata.
+
+**Location**: `frappe/model/meta.py:399-415`
+
+#### `Meta.get_custom_fields()`
+
+Returns list of custom fields from metadata.
+
+**Location**: `frappe/model/meta.py:363-364`
+
+#### `Meta.sort_fields()`
+
+Sorts fields including custom fields based on insert_after.
+
+**Location**: `frappe/model/meta.py:518-590`
+
+---
+
+## Restrictions & Limitations
+
+### DocType Restrictions
+
+Custom fields **cannot** be added to the following types of DocTypes:
+
+#### 1. Core DocTypes
+
+Core DocTypes are system-level doctypes that cannot be customized. The list includes:
+
+**Location**: `frappe/model/__init__.py:101-120`
 
 ```python
-def set_property_setter_for_field_order(self, meta):
-    new_order = [df.fieldname for df in self.fields]
-    frappe.make_property_setter({
-        "doctype": self.doc_type,
-        "doctype_or_field": "DocType",
-        "property": "field_order",
-        "value": json.dumps(new_order),
-    })
+core_doctypes_list = (
+    "DefaultValue",
+    "DocType",
+    "DocField",
+    "DocPerm",
+    "DocType Action",
+    "DocType Link",
+    "User",
+    "Role",
+    "Has Role",
+    "Page",
+    "Module Def",
+    "Print Format",
+    "Report",
+    "Customize Form",
+    "Customize Form Field",
+    "Property Setter",
+    "Custom Field",
+    "Client Script",
+)
 ```
 
-**Reference**: `frappe/custom/doctype/customize_form/customize_form.py:281-305`
+**Validation**: `frappe/custom/doctype/custom_field/custom_field.py:273-274`
 
-### Validation
+```python
+if doctype in core_doctypes_list:
+    return frappe.msgprint(_("Custom Fields cannot be added to core DocTypes."))
+```
 
-**Field Type Changes**:
-- Only certain field type changes are allowed
-- Defined in `ALLOWED_FIELDTYPE_CHANGE`
-- **Reference**: `frappe/custom/doctype/customize_form/customize_form.py:822-832`
+**UI Filter**: `frappe/custom/doctype/custom_field/custom_field.js:13`
 
-**Restrictions**:
-- Cannot customize core DocTypes
-- Cannot customize Single DocTypes
-- Cannot customize custom DocTypes (only standard)
-- Cannot delete standard fields (can hide them)
-- Cannot change certain properties (e.g., `reqd` on standard fields)
+```javascript
+["DocType", "name", "not in", frappe.model.core_doctypes_list]
+```
 
-**Reference**: `frappe/custom/doctype/customize_form/customize_form.py:117-128`
+#### 2. Single DocTypes
 
-### Custom Field Naming
+Single DocTypes (`issingle = 1`) store data in the `tabSingles` table and cannot have custom fields.
 
-**Auto-naming**:
-- If `fieldname` not provided, generated from `label`
-- Prefixed with `custom_` if not already prefixed
-- Lowercased and sanitized
+**UI Filter**: `frappe/custom/doctype/custom_field/custom_field.js:11`
 
-**Method**: `set_fieldname()`  
-**File**: `frappe/custom/doctype/custom_field/custom_field.py:126-157`
+```javascript
+["DocType", "issingle", "=", 0]
+```
 
-**Reference**: `frappe/custom/doctype/custom_field/custom_field.py:126-157`
+**Validation**: `frappe/custom/doctype/customize_form/customize_form.py:124-125`
 
-### Property Setter Naming
+```python
+if meta.issingle:
+    frappe.throw(_("Single DocTypes cannot be customized."))
+```
 
-**Auto-naming**:
-- Format: `{doctype}-{field}-{property}`
-- Example: `Sales Invoice-customer-reqd`
+**Note**: Single DocTypes cannot be customized at all, not just via custom fields.
 
-**Method**: `autoname()`  
-**File**: `frappe/custom/doctype/property_setter/property_setter.py:34-37`
+#### 3. Custom DocTypes
 
-**Reference**: `frappe/custom/doctype/property_setter/property_setter.py:34-37`
+Custom fields can only be added to **standard** DocTypes, not custom DocTypes.
 
-### Database Schema Updates
+**UI Filter**: `frappe/custom/doctype/custom_field/custom_field.js:12`
 
-When Custom Fields are added/updated:
-- `frappe.db.updatedb()` is called to update database schema
-- Adds/alters columns in the database table
-- **Reference**: `frappe/custom/doctype/custom_field/custom_field.py:214`
+```javascript
+["DocType", "custom", "=", 0]
+```
 
-### Translation Support
+**Validation**: `frappe/custom/doctype/custom_field/custom_field.py:276-277`
 
-Customizations support translations:
-- Custom field labels can be translated
-- DocType labels can be translated via Property Setter
-- Translations stored in `Translation` DocType
+```python
+if meta.custom:
+    return frappe.msgprint(_("Custom Fields can only be added to a standard DocType."))
+```
 
-**Method**: `set_name_translation()`  
-**File**: `frappe/custom/doctype/customize_form/customize_form.py:187-209`
+**Also Checked In**: `frappe/custom/doctype/customize_form/customize_form.py:127-128`
 
-**Reference**: `frappe/custom/doctype/customize_form/customize_form.py:187-209`
+```python
+if meta.custom:
+    frappe.throw(_("Only standard DocTypes are allowed to be customized from Customize Form."))
+```
 
-### Custom Links and Actions Ordering
+#### 4. Module Restrictions (Non-Administrator Users)
 
-Ordering is maintained via Property Setters:
-- `links_order`: JSON array of link names
-- `actions_order`: JSON array of action names
-- `states_order`: JSON array of state names
+For non-Administrator users, custom fields cannot be added to DocTypes in the "Core" or "Custom" modules.
 
-**Method**: `update_order_property_setter()`  
-**File**: `frappe/custom/doctype/customize_form/customize_form.py:434-446`
+**UI Filter**: `frappe/custom/doctype/custom_field/custom_field.js:16-17`
 
-**Reference**: `frappe/custom/doctype/customize_form/customize_form.py:434-446`
+```javascript
+if (frappe.session.user !== "Administrator") {
+    filters.push(["DocType", "module", "not in", ["Core", "Custom"]]);
+}
+```
+
+**Note**: Administrator users can add custom fields to any standard DocType (except core, single, and custom doctypes).
+
+#### 5. Domain Restrictions
+
+DocTypes with `restrict_to_domain` are filtered based on active domains.
+
+**UI Filter**: `frappe/custom/doctype/custom_field/custom_field.js:14`
+
+```javascript
+["DocType", "restrict_to_domain", "in", frappe.boot.active_domains]
+```
+
+### Restricted Fieldnames
+
+The following fieldnames cannot be used (automatically suffixed with "1"):
+
+**Location**: `frappe/custom/doctype/custom_field/custom_field.py:127-138`
+
+```python
+restricted = (
+    "name", "parent", "creation", "modified", "modified_by",
+    "parentfield", "parenttype", "file_list", "flags", "docstatus"
+)
+```
+
+### Fieldtype Changes
+
+Fieldtype changes are restricted for non-virtual fields:
+
+**Check**: `frappe/custom/doctype/custom_field/custom_field.py:186-194`
+
+```python
+if (not self.is_virtual and 
+    old_fieldtype != self.fieldtype and
+    not CustomizeForm.allow_fieldtype_change(old_fieldtype, self.fieldtype)):
+    frappe.throw(_("Fieldtype cannot be changed from {0} to {1}"))
+```
+
+### Summary of DocType Restrictions
+
+| Restriction | Condition | Location |
+|------------|-----------|----------|
+| Core DocTypes | `doctype in core_doctypes_list` | `frappe/model/__init__.py:101-120` |
+| Single DocTypes | `issingle = 1` | `frappe/custom/doctype/custom_field/custom_field.js:11` |
+| Custom DocTypes | `custom = 1` | `frappe/custom/doctype/custom_field/custom_field.js:12` |
+| Core/Custom Modules | Non-Administrator users | `frappe/custom/doctype/custom_field/custom_field.js:16-17` |
+| Domain Restricted | Based on active domains | `frappe/custom/doctype/custom_field/custom_field.js:14` |
+
+---
+
+## Developer Mode Behavior
+
+Developer mode (`frappe.conf.developer_mode = 1`) affects custom field functionality in several ways:
+
+### 1. Export Customizations
+
+Exporting custom fields to JSON files is **only allowed in developer mode**.
+
+**Function**: `export_customizations()`  
+**Location**: `frappe/modules/utils.py:54-97`
+
+**Restriction**: `frappe/modules/utils.py:64-65`
+
+```python
+if not frappe.conf.developer_mode:
+    frappe.throw(_("Only allowed to export customizations in developer mode"))
+```
+
+**What It Does**:
+- Exports custom fields, property setters, and custom permissions to `{app}/{module}/custom/{doctype}.json`
+- Recursively exports customizations for child table doctypes
+- Sets `sync_on_migrate` flag for automatic syncing during migrations
+
+**Usage**: Called from UI when exporting customizations for a DocType.
+
+### 2. Auto-Export on Standard Document Creation
+
+When creating standard documents (not custom) in developer mode, they are automatically exported to files.
+
+**Location**: `frappe/modules/utils.py:32-40`
+
+```python
+if not frappe.flags.in_import and is_standard and frappe.conf.developer_mode:
+    from frappe.modules.export_file import export_to_files
+    export_to_files(record_list=[[doc.doctype, doc.name]], record_module=module, create_init=is_standard)
+```
+
+**Note**: This applies to standard DocTypes, not specifically to custom fields, but affects the overall customization workflow.
+
+### 3. Developer Mode in Frontend
+
+Developer mode status is available in the frontend via `frappe.boot.developer_mode`:
+
+**Usage Examples**:
+- `frappe/public/js/frappe/utils/utils.js:1685` - Conditional UI behavior
+- `frappe/public/js/frappe/views/reports/query_report.js:230` - Setting standard flags
+- `frappe/public/js/frappe/views/pageview.js:23` - Caching behavior
+
+### 4. Impact on Custom Field Workflow
+
+**With Developer Mode Enabled**:
+- ✅ Can export custom fields to JSON files
+- ✅ Custom fields can be synced from JSON files during migrations
+- ✅ Standard documents auto-exported to files
+- ✅ Better integration with version control
+
+**Without Developer Mode**:
+- ❌ Cannot export custom fields to JSON files
+- ✅ Can still create custom fields via UI or API
+- ✅ Custom fields still work normally
+- ✅ Can still import from existing JSON files (via sync)
+
+### Setting Developer Mode
+
+Developer mode is set in `site_config.json`:
+
+```json
+{
+    "developer_mode": 1
+}
+```
+
+Or via environment variable or command line flag during bench setup.
+
+---
+
+## Best Practices
+
+1. **Use Custom Apps**: Define custom fields in JSON files within custom app modules for version control and deployment
+2. **Naming Convention**: Fieldnames are auto-prefixed with `custom_` - don't manually add this prefix
+3. **System Generated Flag**: Set `is_system_generated: True` for programmatically created fields
+4. **Virtual Fields**: Use `is_virtual: 1` for computed fields that don't need database storage
+5. **Positioning**: Always specify `insert_after` for predictable field ordering
+6. **Validation**: Don't skip validation unless necessary (e.g., during migrations)
+7. **Developer Mode**: Enable developer mode when developing custom apps to export customizations
+8. **Sync on Migrate**: Set `sync_on_migrate: true` in custom JSON files for automatic syncing
+
+---
+
+## Testing
+
+Test cases are available in:
+
+**File**: `frappe/custom/doctype/custom_field/test_custom_field.py`
+
+**Test Cases**:
+- `test_create_custom_fields()` - Tests bulk creation
+- `test_custom_field_sorting()` - Tests field ordering
+- `test_custom_section_and_column_breaks_ordering()` - Tests break positioning
+- `test_custom_field_renaming()` - Tests fieldname renaming
+
+**Reference**: `frappe/custom/doctype/custom_field/test_custom_field.py`
 
 ---
 
 ## Summary
 
-DocType customization in Frappe works through:
+Custom fields in Frappe provide a powerful mechanism to extend standard DocTypes:
 
-1. **Property Setters**: Override properties without modifying JSON
-2. **Custom Fields**: Add new fields stored separately
-3. **Metadata Merging**: Customizations are applied when metadata is loaded
-4. **Export/Sync**: Customizations can be exported and synced via fixtures
-5. **Database Storage**: All customizations stored in database tables
-6. **Dynamic Application**: Customizations applied at runtime, not at install time
+1. **Storage**: Stored in `tabCustom Field` table, separate from DocType JSON
+2. **Loading**: Automatically merged into metadata via `Meta.add_custom_fields()`
+3. **Schema**: Database columns created via `frappe.db.updatedb()`
+4. **Creation**: Via UI, Python API, or custom app JSON files
+5. **Ordering**: Controlled by `insert_after` property
+6. **Apps**: Can be exported/imported via custom app modules
 
-This architecture ensures:
-- ✅ Standard DocTypes remain untouched
-- ✅ Customizations persist across updates
-- ✅ Customizations can be version controlled
-- ✅ Customizations can be shared via custom apps
-- ✅ No JSON file modifications required
-
----
-
-## Key File References
-
-| Component | File Path | Key Lines |
-|-----------|-----------|-----------|
-| Customize Form Controller | `frappe/custom/doctype/customize_form/customize_form.py` | 29-835 |
-| Customize Form UI | `frappe/custom/doctype/customize_form/customize_form.js` | 1-514 |
-| Property Setter | `frappe/custom/doctype/property_setter/property_setter.py` | 11-115 |
-| Custom Field | `frappe/custom/doctype/custom_field/custom_field.py` | 16-443 |
-| Metadata Loading | `frappe/model/meta.py` | 125-489 |
-| Export Customizations | `frappe/modules/utils.py` | 55-97 |
-| Sync Customizations | `frappe/modules/utils.py` | 100-194 |
-| Migration Hook | `frappe/migrate.py` | 154 |
-
----
-
-## Additional Resources
-
-- **Customization Extractor** (for translations): `frappe/gettext/extractors/customization.py`
-- **Customize Form Field** (child table): `frappe/custom/doctype/customize_form_field/customize_form_field.py`
-- **Reset Customization**: `frappe/custom/doctype/customize_form/customize_form.py:678-700`
+This architecture allows customization while maintaining upgradability of standard DocTypes.
