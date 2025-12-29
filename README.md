@@ -171,21 +171,302 @@ bench --site mysite new-doctype "Simple DocType"
 - No controller class generation
 - Best for initial structure; refine complex features in Desk
 
+## REST API
+
+Commander exposes all CLI features via REST API endpoints, enabling programmatic access from external applications, CI/CD pipelines, and AI agents.
+
+### Base URL
+
+All endpoints are available at:
+```
+/api/method/commander.api.<method_name>
+```
+
+### Authentication
+
+Most endpoints require authentication with **System Manager** role. Use either:
+- Session-based authentication (cookies)
+- API Key authentication: `Authorization: token YOUR_API_KEY:YOUR_API_SECRET`
+
+### Quick Start
+
+```bash
+# Get API documentation
+curl https://your-site.com/api/method/commander.api.get_api_documentation
+
+# Create DocType via API
+curl -X POST https://your-site.com/api/method/commander.api.create_doctype_api \
+  -H "Content-Type: application/json" \
+  -H "Authorization: token YOUR_API_KEY:YOUR_API_SECRET" \
+  -d '{
+    "doctype_name": "Product",
+    "fields": ["product_name:Data:*", "price:Currency:?=0"],
+    "module": "Custom"
+  }'
+```
+
+### Available Endpoints
+
+#### 1. Create DocType
+
+**Endpoint**: `POST /api/method/commander.api.create_doctype_api`
+
+Create a new DocType with field definitions.
+
+**Request**:
+```json
+{
+  "doctype_name": "Product",
+  "fields": [
+    "product_name:Data:*",
+    "price:Currency:?=0",
+    "description:Text"
+  ],
+  "module": "Custom",
+  "custom": false
+}
+```
+
+**Response** (Success):
+```json
+{
+  "success": true,
+  "message": "DocType 'Product' created successfully in module 'Custom'",
+  "data": {
+    "doctype_name": "Product",
+    "module": "Custom",
+    "fields_count": 3,
+    "custom": false
+  }
+}
+```
+
+**Response** (Error):
+```json
+{
+  "success": false,
+  "error": {
+    "message": "DocType 'Product' already exists.",
+    "code": "DOCTYPE_EXISTS",
+    "details": {
+      "doctype_name": "Product"
+    }
+  }
+}
+```
+
+#### 2. Add Custom Field
+
+**Endpoint**: `POST /api/method/commander.api.add_custom_field_api`
+
+Add a custom field to an existing standard DocType.
+
+**Request**:
+```json
+{
+  "doctype": "Customer",
+  "field_definition": "custom_industry:Data:*",
+  "insert_after": "customer_name"
+}
+```
+
+**Response** (Success):
+```json
+{
+  "success": true,
+  "message": "Custom field 'custom_industry' added successfully to DocType 'Customer'",
+  "data": {
+    "doctype": "Customer",
+    "fieldname": "custom_industry",
+    "fieldtype": "Data",
+    "label": "Industry",
+    "required": true,
+    "unique": false,
+    "read_only": false,
+    "insert_after": "customer_name"
+  }
+}
+```
+
+#### 3. Add Property Setter
+
+**Endpoint**: `POST /api/method/commander.api.add_property_setter_api`
+
+Add a property setter to customize DocType or field properties.
+
+**Request** (DocType property):
+```json
+{
+  "doctype": "Sales Invoice",
+  "property": "allow_copy",
+  "value": "1",
+  "property_type": "Check",
+  "for_doctype": true
+}
+```
+
+**Request** (Field property):
+```json
+{
+  "doctype": "Sales Invoice",
+  "field_name": "customer",
+  "property": "reqd",
+  "value": "1",
+  "property_type": "Check"
+}
+```
+
+**Response** (Success):
+```json
+{
+  "success": true,
+  "message": "Property setter for 'allow_copy' created successfully",
+  "data": {
+    "doctype": "Sales Invoice",
+    "field_name": null,
+    "property": "allow_copy",
+    "value": "1",
+    "property_type": "Check",
+    "doctype_or_field": "DocType"
+  }
+}
+```
+
+#### 4. Get API Documentation
+
+**Endpoint**: `GET /api/method/commander.api.get_api_documentation`
+
+Get comprehensive REST API documentation with examples, error codes, and usage instructions.
+
+**Response**:
+```json
+{
+  "success": true,
+  "documentation": {
+    "title": "Commander REST API Documentation",
+    "version": "1.0.0",
+    "endpoints": [...],
+    "error_codes": [...],
+    "usage_examples": [...]
+  }
+}
+```
+
+### Error Codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `PERMISSION_DENIED` | 403 | User lacks System Manager role |
+| `DOCTYPE_EXISTS` | 409 | DocType already exists |
+| `DOCTYPE_NOT_FOUND` | 404 | DocType does not exist |
+| `MODULE_NOT_FOUND` | 400 | Module or app not found |
+| `CORE_DOCTYPE` | 400 | Cannot customize core DocTypes |
+| `SINGLE_DOCTYPE` | 400 | Cannot customize single DocTypes |
+| `CUSTOM_DOCTYPE` | 400 | Cannot customize custom DocTypes |
+| `FIELD_EXISTS` | 409 | Custom field already exists |
+| `FIELD_NOT_FOUND` | 404 | Field does not exist |
+| `VALIDATION_ERROR` | 400 | Invalid request parameters |
+| `INTERNAL_ERROR` | 500 | Unexpected server error |
+
+### Python Example
+
+```python
+import requests
+
+# Create DocType
+url = "https://your-site.com/api/method/commander.api.create_doctype_api"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "token YOUR_API_KEY:YOUR_API_SECRET"
+}
+data = {
+    "doctype_name": "Product",
+    "fields": [
+        "product_name:Data:*",
+        "price:Currency:?=0",
+        "description:Text"
+    ],
+    "module": "Custom"
+}
+
+response = requests.post(url, json=data, headers=headers)
+result = response.json()
+
+if result.get("success"):
+    print(f"Created: {result['data']['doctype_name']}")
+else:
+    print(f"Error: {result['error']['message']}")
+```
+
+### JavaScript Example
+
+```javascript
+// Create DocType
+fetch('https://your-site.com/api/method/commander.api.create_doctype_api', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'token YOUR_API_KEY:YOUR_API_SECRET'
+  },
+  body: JSON.stringify({
+    doctype_name: 'Product',
+    fields: [
+      'product_name:Data:*',
+      'price:Currency:?=0',
+      'description:Text'
+    ],
+    module: 'Custom'
+  })
+})
+.then(response => response.json())
+.then(data => {
+  if (data.success) {
+    console.log('Created:', data.data.doctype_name);
+  } else {
+    console.error('Error:', data.error.message);
+  }
+});
+```
+
+### Restrictions
+
+- **Custom fields** can only be added to **standard DocTypes** (not custom DocTypes)
+- **Core DocTypes** (DocType, User, Role, etc.) cannot be customized
+- **Single DocTypes** cannot have custom fields
+- All operations require **System Manager** role
+
+### Complete Documentation
+
+For complete API documentation including all endpoints, error codes, and examples, call:
+
+```bash
+curl https://your-site.com/api/method/commander.api.get_api_documentation
+```
+
+Or visit the endpoint in your browser while authenticated.
+
 ## Roadmap
 
-### Next Steps
+### Completed
 
-**1. REST API Interface**
+✅ **REST API Interface**
 - Expose DocType creation via REST endpoints
 - Enable external applications to generate DocTypes programmatically
 - Standard HTTP interface for integration with any tech stack
+- Comprehensive error handling and documentation
 
-**2. MCP (Model Context Protocol) Support**
+### Next Steps
+
+**1. MCP (Model Context Protocol) Support**
 - Implement MCP server for LLM integration
 - Allow AI agents to create and modify DocTypes via MCP
 - Enable conversational schema design through AI assistants
 
-These additions will make Commander accessible beyond the command line, supporting both traditional API integrations and modern LLM-driven workflows.
+**2. Additional Features**
+- Bulk operations endpoint
+- DocType update endpoint
+- Field update/delete endpoints
+- Customization export endpoint
 
 ## Development
 
