@@ -2,6 +2,7 @@ import re
 import click
 import frappe
 from frappe.commands import get_site, pass_context
+from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 
 try:
     from frappe.custom.doctype.custom_field.custom_field import create_custom_field
@@ -1017,7 +1018,7 @@ def set_property_on_doctype(doctype_name, property_name, value, property_type=No
         ps.insert()
     else:
         # Use Frappe's make_property_setter for DocType and DocField
-        frappe.make_property_setter(
+        make_property_setter(
             doctype=doctype_name,
             fieldname=field_name,
             property=property_name,
@@ -1063,25 +1064,26 @@ def customize_doctype_cmd(context, doctype_name, fields, insert_after):
     with frappe.init_site(site):
         frappe.connect()
         
-        # Parse field definition
-        try:
-            field_dict = parse_field_definition(field, for_custom_field=True)
-        except ValueError as e:
-            raise click.ClickException(str(e))
-        
-        # Override insert_after if provided via option
-        if insert_after:
-            field_dict["insert_after"] = insert_after
-        
-        # Add custom field
-        try:
-            field_name = add_custom_field(doctype_name, field_dict)
-            click.echo(
-                f"Custom field '{field_name}' added to DocType '{doctype_name}'. "
-                f"Refresh your browser to see the changes."
-            )
-        except Exception as e:
-            raise click.ClickException(str(e))
+        for field_def in fields:
+            # Parse field definition
+            try:
+                field_dict = parse_field_definition(field_def, for_custom_field=True)
+            except ValueError as e:
+                raise click.ClickException(str(e))
+            
+            # Override insert_after if provided via option
+            if insert_after:
+                field_dict["insert_after"] = insert_after
+            
+            # Add custom field
+            try:
+                field_name = add_custom_field(doctype_name, field_dict)
+                click.echo(
+                    f"Custom field '{field_name}' added to DocType '{doctype_name}'. "
+                    f"Refresh your browser to see the changes."
+                )
+            except Exception as e:
+                raise click.ClickException(str(e))
 
 
 # Register commands for bench to discover
